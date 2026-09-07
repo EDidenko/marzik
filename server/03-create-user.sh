@@ -8,8 +8,26 @@ USERNAME="${1:-vn-phone}"
 PANEL_PORT="${PANEL_PORT:-8000}"
 API="http://127.0.0.1:${PANEL_PORT}"
 
-command -v jq       >/dev/null || apt-get -y -qq install jq
-command -v qrencode >/dev/null || apt-get -y -qq install qrencode
+
+# Секреты кладём в домашку того, кто вызвал sudo, а не в /root — иначе под deploy
+# их не прочитать без sudo. Переопределить: OUT_DIR=/path bash <скрипт>
+if [[ -z "${OUT_DIR:-}" ]]; then
+  if [[ -n "${SUDO_USER:-}" && "$SUDO_USER" != "root" ]]; then
+    OUT_DIR="$(getent passwd "$SUDO_USER" | cut -d: -f6)/marzban"
+    OUT_OWNER="$SUDO_USER"
+  else
+    OUT_DIR="/root/marzban"
+    OUT_OWNER="root"
+  fi
+fi
+OUT_OWNER="${OUT_OWNER:-root}"
+mkdir -p "$OUT_DIR"; chmod 700 "$OUT_DIR"
+if [[ $EUID -eq 0 ]]; then chown "$OUT_OWNER":"$(id -gn "$OUT_OWNER")" "$OUT_DIR"; fi
+
+# Скрипту root не нужен — он ходит в API. Но доставить пакеты можно только через sudo.
+SUDO=""; if [[ $EUID -ne 0 ]]; then SUDO="sudo"; fi
+command -v jq       >/dev/null || $SUDO apt-get -y -qq install jq
+command -v qrencode >/dev/null || $SUDO apt-get -y -qq install qrencode
 
 ADMIN_USER="${ADMIN_USER:-}"; ADMIN_PASS="${ADMIN_PASS:-}"
 [[ -n "$ADMIN_USER" ]] || read -rp  "Admin login: "    ADMIN_USER
@@ -62,9 +80,10 @@ echo
 echo "QR основной ссылки (сканируй камерой из v2rayNG / Streisand):"
 qrencode -t ANSIUTF8 -m 1 "${LINKS[0]}"
 
-printf '%s\n' "${LINKS[@]}" >"/root/${USERNAME}-links.txt"
-qrencode -o "/root/${USERNAME}-qr.png" -s 8 "${LINKS[0]}"
-chmod 600 "/root/${USERNAME}-links.txt" "/root/${USERNAME}-qr.png"
+printf '%s\n' "${LINKS[@]}" >"${OUT_DIR}/${USERNAME}-links.txt"
+qrencode -o "${OUT_DIR}/${USERNAME}-qr.png" -s 8 "${LINKS[0]}"
+chmod 600 "${OUT_DIR}/${USERNAME}-links.txt" "${OUT_DIR}/${USERNAME}-qr.png"
+if [[ $EUID -eq 0 ]]; then chown "$OUT_OWNER" "${OUT_DIR}/${USERNAME}-links.txt" "${OUT_DIR}/${USERNAME}-qr.png"; fi
 echo
-echo "Сохранено: /root/${USERNAME}-links.txt и /root/${USERNAME}-qr.png"
-echo "Забрать PNG на ноут:  scp root@<IP>:/root/${USERNAME}-qr.png ."
+echo "Сохранено: ${OUT_DIR}/${USERNAME}-links.txt и ${OUT_DIR}/${USERNAME}-qr.png"
+echo "Забрать PNG на ноут:  scp <user>@<IP>:${OUT_DIR}/${USERNAME}-qr.png ."

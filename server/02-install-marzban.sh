@@ -13,7 +13,21 @@ COMPOSE=/opt/marzban/docker-compose.yml
 ENVFILE=/opt/marzban/.env
 XRAYJSON=/var/lib/marzban/xray_config.json
 
-[[ $EUID -eq 0 ]] || { echo "Запускать от root"; exit 1; }
+[[ $EUID -eq 0 ]] || { echo "Запускать от root (или через sudo)"; exit 1; }
+
+# Секреты кладём в домашку того, кто вызвал sudo, а не в /root — иначе под deploy
+# их не прочитать без sudo. Переопределить: OUT_DIR=/path bash <скрипт>
+if [[ -z "${OUT_DIR:-}" ]]; then
+  if [[ -n "${SUDO_USER:-}" && "$SUDO_USER" != "root" ]]; then
+    OUT_DIR="$(getent passwd "$SUDO_USER" | cut -d: -f6)/marzban"
+    OUT_OWNER="$SUDO_USER"
+  else
+    OUT_DIR="/root/marzban"
+    OUT_OWNER="root"
+  fi
+fi
+OUT_OWNER="${OUT_OWNER:-root}"
+install -d -m 700 -o "$OUT_OWNER" -g "$(id -gn "$OUT_OWNER")" "$OUT_DIR"
 
 echo "==> Проверка, что порт ${VLESS_PORT} свободен"
 if ss -lntH "sport = :${VLESS_PORT}" | grep -q .; then
@@ -123,7 +137,7 @@ echo "==> Перезапуск"
 marzban restart -n || docker compose -f "$COMPOSE" up -d --force-recreate
 
 sleep 5
-cat >/root/marzban-reality.txt <<EOF
+cat >"${OUT_DIR}/reality.txt" <<EOF
 dest / SNI        : ${REALITY_DEST}
 port              : ${VLESS_PORT} (backup ${VLESS_PORT_ALT}, SNI www.apple.com)
 privateKey (srv)  : ${PRIVATE_KEY}
@@ -133,13 +147,14 @@ flow              : xtls-rprx-vision
 fingerprint (fp)  : chrome
 inbound tags      : "VLESS TCP REALITY", "VLESS TCP REALITY BACKUP"
 EOF
-chmod 600 /root/marzban-reality.txt
+chmod 600 "${OUT_DIR}/reality.txt"
+chown "$OUT_OWNER" "${OUT_DIR}/reality.txt"
 
 echo
 echo "================ Reality готов ================"
-cat /root/marzban-reality.txt
+cat "${OUT_DIR}/reality.txt"
 echo "==============================================="
-echo "Сохранено в /root/marzban-reality.txt"
+echo "Сохранено в ${OUT_DIR}/reality.txt"
 echo
 echo "Логи ядра:  marzban logs -f   (Ctrl+C для выхода)"
 echo "Далее: создай админа ->  marzban cli admin create --sudo"

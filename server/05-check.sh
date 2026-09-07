@@ -33,4 +33,5 @@ timeout 10 openssl s_client -connect "${IP}:${VLESS_PORT}" -servername "${DEST}"
 echo "^ должен показать сертификат ${DEST} — значит Reality корректно маскируется"
 
 hr "Параметры Reality"
-cat /root/marzban-reality.txt 2>/dev/null || echo "нет /root/marzban-reality.txt"
+find /root /home -maxdepth 3 -name reality.txt -path '*/marzban/*' 2>/dev/null \
+  | head -1 | xargs -r cat || echo "reality.txt не найден"

@@ -9,6 +9,7 @@ Reality не режется DPI Vinaphone/Viettel, потому что для н
 
 | Файл | Что делает |
 |---|---|
+| `server/00-deploy-user.sh` | создаёт пользователя `deploy` с sudo и твоим SSH-ключом |
 | `server/01-bootstrap.sh` | apt upgrade, Docker, BBR, UFW, отключение пароля root по SSH |
 | `server/02-install-marzban.sh` | ставит Marzban, генерит ключи Reality, пишет `xray_config.json` |
 | `server/03-create-user.sh` | создаёт юзера через API, печатает `vless://` и QR |
@@ -18,47 +19,109 @@ Reality не режется DPI Vinaphone/Viettel, потому что для н
 | `server/xray_config.example.json` | эталон конфига Reality |
 | `server/optional-ws-cdn.md` | запасной канал VLESS+WS через Cloudflare (нужен домен) |
 
-## Залить на сервер
+## Шаг 0. Рабочий пользователь
+
+Первый и единственный вход под root — чтобы завести `deploy` и больше root по SSH
+не пускать:
 
 ```bash
-scp -r server root@<IP>:/root/marzban-setup
-ssh root@<IP>
-cd /root/marzban-setup
+scp server/00-deploy-user.sh root@<IP>:/root/
+ssh root@<IP> 'bash /root/00-deploy-user.sh'
 ```
+
+Клонировать репозиторий прямо на сервере на этом шаге нельзя: `deploy` ещё не создан,
+а если репозиторий приватный — у сервера вообще нет доступа к GitHub. Поэтому
+единственный файл, который доставляется через `scp`, — этот.
+
+Если репозиторий публичный, шаг 0 сводится к одной строке:
+
+```bash
+ssh root@<IP>
+curl -fsSL https://raw.githubusercontent.com/EDidenko/marzik/main/server/00-deploy-user.sh | bash
+```
+
+Скрипт создаёт `deploy`, кладёт ему тот же SSH-ключ, которым ты вошёл, даёт `sudo`
+и группу `docker`. Пароля у учётки нет — только ключ, поэтому sudo идёт через
+`NOPASSWD` (иначе беспарольный `deploy` не смог бы им пользоваться).
+
+Отдельный ключ вместо унаследованного:
+
+```bash
+PUBKEY="ssh-ed25519 AAAA... me@laptop" bash 00-deploy-user.sh
+```
+
+**Не закрывая root-сессию**, проверь в новом окне: `ssh deploy@<IP>` и `sudo -n true`.
+Работает — дальше всё под `deploy`:
+
+```bash
+ssh -A deploy@<IP>          # -A пробрасывает ssh-агент: приватный репо клонируется
+cd ~ && git clone git@github.com:EDidenko/marzik.git
+cd marzik/server
+```
+
+Публичный репозиторий — проще: `git clone https://github.com/EDidenko/marzik.git`,
+`-A` не нужен.
+
+Чтобы сервер мог делать `git pull` сам, без проброшенного агента, заведи **deploy key**
+(read-only, отзывается отдельно от аккаунта):
+
+```bash
+ssh-keygen -t ed25519 -N "" -f ~/.ssh/gh_marzik -C "marzik@$(hostname)"
+printf 'Host github.com\n  IdentityFile ~/.ssh/gh_marzik\n  IdentitiesOnly yes\n' >> ~/.ssh/config
+cat ~/.ssh/gh_marzik.pub    # -> GitHub: репозиторий -> Settings -> Deploy keys -> Add
+```
+
+Клонируй в домашку `deploy`, а не в `/opt`: туда установщик положит `/opt/marzban`.
+
+> Зачем это нужно, если `deploy` с sudo и в группе `docker` — тот же root?
+> Изоляции здесь действительно нет. Смысл в другом: после шага 1 в sshd встанет
+> `PermitRootLogin no`, а брутфорс-боты стучатся именно в `root`. Плюс `SUDO_USER`
+> в логах и явное `sudo` вместо молчаливого выполнения от root.
 
 ---
 
 ## Шаг 1. Подготовка сервера
 
 ```bash
-bash 01-bootstrap.sh
+sudo bash 01-bootstrap.sh
 ```
 
 Ставит Docker (если нет), включает BBR, настраивает UFW: открыты **22, 443, 8443, 8000**,
 всё остальное закрыто. Marzban запускается с `network_mode: host`, поэтому правила UFW
 на него действуют (при обычном `ports:` докер обошёл бы UFW через свои iptables-цепочки).
 
-Хардненинг SSH — отдельно и **только после** того, как проверил вход по ключу:
+Хардненинг SSH — отдельным прогоном и **только после** того, как убедился, что
+`ssh deploy@<IP>` работает:
 
 ```bash
-ssh-copy-id root@<IP>        # с ноутбука, если ключа ещё нет
-HARDEN_SSH=1 bash 01-bootstrap.sh
+sudo HARDEN_SSH=1 bash 01-bootstrap.sh
 ```
 
-Скрипт откажется отключать пароль, если `authorized_keys` пуст. Не закрывай текущую
-SSH-сессию, пока не убедился, что вход по ключу работает в новом окне.
+Скрипт сам решает, насколько закрутить: если `deploy` существует, имеет ключ и sudo —
+ставит `PermitRootLogin no`; если нет — только `prohibit-password`, чтобы ты не остался
+за дверью. При пустом `authorized_keys` он не тронет sshd вообще.
+
+Держи текущую сессию открытой, пока не проверишь вход в новом окне. Не пустило —
+откат прямо из неё:
+
+```bash
+sudo rm /etc/ssh/sshd_config.d/00-hardening.conf && sudo systemctl restart ssh
+```
+
+Если сессия всё-таки закрылась и доступа нет — спасает только веб-консоль (VNC/serial)
+в панели хостера. Проверь заранее, что она у тебя есть.
 
 ---
 
 ## Шаг 2. Установка Marzban
 
 ```bash
-bash 02-install-marzban.sh
+sudo bash 02-install-marzban.sh
 ```
 
 Что делает:
 1. Проверяет, что 443 свободен (если там nginx — скрипт остановится; либо погаси nginx,
-   либо запусти `VLESS_PORT=8443 bash 02-install-marzban.sh`).
+   либо запусти `sudo VLESS_PORT=8443 bash 02-install-marzban.sh`).
 2. Проверяет, что `www.microsoft.com` доступен с сервера по TLS 1.3 + HTTP/2 — без этого
    Reality не заработает.
 3. Ставит Marzban официальным скриптом Gozargah в `/opt/marzban` (compose + `.env`),
@@ -68,15 +131,16 @@ bash 02-install-marzban.sh
 Другой SNI — переменной:
 
 ```bash
-REALITY_DEST=www.apple.com bash 02-install-marzban.sh
+sudo REALITY_DEST=www.apple.com bash 02-install-marzban.sh
 ```
 
-Ключи и параметры остаются в `/root/marzban-reality.txt` (chmod 600).
+Ключи и параметры остаются в `~/marzban/reality.txt` (режим 700, владелец — тот,
+кто вызвал sudo, а не root).
 
 ### Создать админа панели
 
 ```bash
-marzban cli admin create --sudo
+sudo marzban cli admin create --sudo
 ```
 
 Панель: `http://<IP>:8000/dashboard/`
@@ -125,8 +189,10 @@ bash 03-create-user.sh vn-phone
 Спросит логин/пароль админа, создаст юзера без лимитов и срока, выведет `vless://…`,
 нарисует QR прямо в терминале и сохранит:
 
-* `/root/vn-phone-links.txt`
-* `/root/vn-phone-qr.png` → забрать: `scp root@<IP>:/root/vn-phone-qr.png .`
+* `~/marzban/vn-phone-links.txt`
+* `~/marzban/vn-phone-qr.png` → забрать: `scp deploy@<IP>:marzban/vn-phone-qr.png .`
+
+Этот скрипт единственный, которому root не нужен: он работает через REST API панели.
 
 Ссылка выглядит так:
 
@@ -171,8 +237,8 @@ vless://<uuid>@<IP>:443?security=reality&encryption=none&pbk=<publicKey>&fp=chro
 На сервере:
 
 ```bash
-bash 05-check.sh          # всё сразу
-marzban logs -f           # живые логи Marzban + Xray
+sudo bash 05-check.sh     # всё сразу
+sudo marzban logs -f      # живые логи Marzban + Xray
 ```
 
 Ключевой тест маскировки — с любой машины:
@@ -198,7 +264,7 @@ SNI забанен или недоступен с сервера. Переген
 сохранятся, поменяется только SNI (не забудь обновить ссылку у клиента):
 
 ```bash
-REALITY_DEST=www.yahoo.com bash 02-install-marzban.sh
+sudo REALITY_DEST=www.yahoo.com bash 02-install-marzban.sh
 # альтернативы: www.amazon.com, www.bing.com, www.samsung.com, dl.google.com, www.icloud.com
 ```
 
@@ -229,16 +295,16 @@ apt-get -y install iptables-persistent && netfilter-persistent save
 
 **Ссылка без `pbk=`**
 Ядро Xray старое и не выводит публичный ключ. `marzban core-update`, затем
-`marzban restart -n`. Публичный ключ на всякий случай лежит в `/root/marzban-reality.txt`.
+`marzban restart -n`. Публичный ключ на всякий случай лежит в `~/marzban/reality.txt`.
 
 ---
 
 ## Автообновление
 
 ```bash
-bash 04-autoupdate.sh cron          # рекомендуется
+sudo bash 04-autoupdate.sh cron          # рекомендуется
 # или
-bash 04-autoupdate.sh watchtower
+sudo bash 04-autoupdate.sh watchtower
 ```
 
 Cron раз в неделю дёргает `marzban update` — штатный путь, который корректно
@@ -250,14 +316,14 @@ Cron раз в неделю дёргает `marzban update` — штатный �
 ## Обслуживание
 
 ```bash
-marzban status | restart | logs -f | update | core-update
-marzban cli admin create --sudo
-marzban backup                      # бэкап /var/lib/marzban
-docker ps
+sudo marzban status | restart | logs -f | update | core-update
+sudo marzban cli admin create --sudo
+sudo marzban backup                 # бэкап /var/lib/marzban
+docker ps                           # без sudo: deploy в группе docker
 ```
 
 Забэкапить руками — достаточно скопировать `/var/lib/marzban` и `/opt/marzban/.env`:
 
 ```bash
-tar czf marzban-backup.tar.gz /var/lib/marzban /opt/marzban/.env
+sudo tar czf marzban-backup.tar.gz /var/lib/marzban /opt/marzban/.env
 ```
