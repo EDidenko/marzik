@@ -2,7 +2,9 @@
 # Шаг 2+3: установка Marzban (Docker Compose) и настройка VLESS + Reality.
 # Запуск:  bash 02-install-marzban.sh
 # Переменные:
-#   REALITY_DEST=www.microsoft.com  VLESS_PORT=443  VLESS_PORT_ALT=8443  PANEL_PORT=8000
+#   REALITY_DEST=www.apple.com      dest/SNI основного инбаунда
+#   REALITY_DEST_ALT=...            dest/SNI резервного; по умолчанию берётся из конфига
+#   VLESS_PORT=443  VLESS_PORT_ALT=8443  PANEL_PORT=8000
 #   REGEN_KEYS=1        сгенерировать НОВУЮ пару x25519 и shortId (ломает все выданные ссылки)
 #   TAG_MAIN / TAG_ALT  теги инбаундов; по умолчанию берутся из существующего конфига
 #
@@ -10,7 +12,10 @@
 # ключи, shortId и теги инбаундов, поэтому ссылки и привязки юзеров в панели переживают его.
 set -euo pipefail
 
-REALITY_DEST="${REALITY_DEST:-www.microsoft.com}"
+# www.microsoft.com намеренно НЕ дефолт: на Xray 24.12.31 Reality-хендшейк с ним не
+# проходит — проверено сквозным тестом (08-selftest.sh), при том что снаружи порт
+# исправно отдаёт сертификат Microsoft и ВСЕ косвенные проверки зелёные.
+REALITY_DEST="${REALITY_DEST:-www.apple.com}"
 VLESS_PORT="${VLESS_PORT:-443}"
 VLESS_PORT_ALT="${VLESS_PORT_ALT:-8443}"
 PANEL_PORT="${PANEL_PORT:-8000}"
@@ -57,7 +62,7 @@ fi
 echo "==> Проверка dest: ${REALITY_DEST} должен отдавать TLS 1.3 + HTTP/2"
 if ! curl -sI --tlsv1.3 --tls-max 1.3 --http2 -m 10 -o /dev/null "https://${REALITY_DEST}/"; then
   echo "!! ${REALITY_DEST} не отвечает по TLS1.3/H2 с этого сервера."
-  echo "!! Возьми другой: www.apple.com, www.samsung.com, www.cloudflare.com, dl.google.com"; exit 1
+  echo "!! Возьми другой: www.apple.com, www.samsung.com, dl.google.com, www.icloud.com"; exit 1
 fi
 
 echo "==> Установка Marzban (официальный скрипт Gozargah)"
@@ -84,6 +89,14 @@ if [[ -z "${TAG_MAIN:-}" && -f "$XRAYJSON" ]]; then
 fi
 TAG_MAIN="${TAG_MAIN:-VLESS TCP REALITY}"
 TAG_ALT="${TAG_ALT:-${TAG_MAIN} BACKUP}"
+
+# dest резервного инбаунда: на повторном прогоне сохраняем текущий, иначе смена
+# REALITY_DEST заодно снесла бы работающий запасной канал.
+if [[ -z "${REALITY_DEST_ALT:-}" && -f "$XRAYJSON" ]]; then
+  REALITY_DEST_ALT="$(jq -r '.inbounds[1].streamSettings.realitySettings.serverNames[0] // empty' \
+    "$XRAYJSON" 2>/dev/null || true)"
+fi
+REALITY_DEST_ALT="${REALITY_DEST_ALT:-www.apple.com}"
 
 # На IPv4-only сервере дефолтный freedom (domainStrategy: AsIs) отдаёт имя системному
 # диалеру, тот видит AAAA и уходит в IPv6, которого нет, — соединения виснут, а внешне
@@ -162,9 +175,9 @@ cat >"$XRAYJSON" <<EOF
         "security": "reality",
         "realitySettings": {
           "show": false,
-          "dest": "www.apple.com:443",
+          "dest": "${REALITY_DEST_ALT}:443",
           "xver": 0,
-          "serverNames": ["www.apple.com"],
+          "serverNames": ["${REALITY_DEST_ALT}"],
           "privateKey": "${PRIVATE_KEY}",
           "shortIds": ["${SHORT_ID}"]
         }
@@ -214,7 +227,7 @@ marzban restart -n || docker compose -f "$COMPOSE" up -d --force-recreate
 sleep 5
 cat >"${OUT_DIR}/reality.txt" <<EOF
 dest / SNI        : ${REALITY_DEST}
-port              : ${VLESS_PORT} (backup ${VLESS_PORT_ALT}, SNI www.apple.com)
+port              : ${VLESS_PORT} (backup ${VLESS_PORT_ALT}, SNI ${REALITY_DEST_ALT})
 privateKey (srv)  : ${PRIVATE_KEY}
 publicKey  (pbk)  : ${PUBLIC_KEY}
 shortId    (sid)  : ${SHORT_ID}

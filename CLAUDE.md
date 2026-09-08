@@ -53,7 +53,14 @@ Key facts that span files:
 - **UFW works because Marzban runs `network_mode: host`.** With normal Docker `ports:` mapping,
   container traffic would bypass UFW via Docker's iptables chains.
 - **The generated `xray_config.json` has two inbounds sharing one keypair**: primary on 443
-  (`serverNames: www.microsoft.com`) and backup on 8443 (`www.apple.com`).
+  (`REALITY_DEST`) and backup on 8443 (`REALITY_DEST_ALT`, which defaults to whatever the
+  existing config already uses so changing the primary dest never breaks a working backup).
+- **`www.microsoft.com` is a known-bad dest** on Xray 24.12.31: the Reality handshake fails
+  while every indirect check stays green (port listens, external `openssl s_client` returns a
+  genuine Microsoft certificate with `Verify return code: 0`, dest reachable over TLS1.3+H2).
+  It was the repo default and was replaced with `www.apple.com`, verified end-to-end. When a
+  dest is suspect, A/B it with `LINK_INDEX=1 08-selftest.sh` — the two inbounds differ only in
+  port and dest, so a split result isolates the dest.
 - **`02-install-marzban.sh` is idempotent by design.** Re-running it (the documented way to
   change `REALITY_DEST`) must not break issued links, so it reuses the existing `privateKey`,
   `shortId`, and **inbound tags** read out of the current `xray_config.json`. Only `REGEN_KEYS=1`

@@ -2,7 +2,7 @@
 
 Готовый комплект: Xray-core под панелью Marzban, протокол **VLESS + Reality на TCP/443**.
 Reality не режется DPI Vinaphone/Viettel, потому что для наблюдателя соединение выглядит
-как обычный TLS 1.3 к `www.microsoft.com` — включая настоящий сертификат Microsoft.
+как обычный TLS 1.3 к `www.apple.com` — включая настоящий сертификат Apple.
 Домен и Let's Encrypt не нужны, работает по голому IP.
 
 ## Файлы
@@ -125,7 +125,7 @@ sudo bash 02-install-marzban.sh
 Что делает:
 1. Проверяет, что 443 свободен (если там nginx — скрипт остановится; либо погаси nginx,
    либо запусти `sudo VLESS_PORT=8443 bash 02-install-marzban.sh`).
-2. Проверяет, что `www.microsoft.com` доступен с сервера по TLS 1.3 + HTTP/2 — без этого
+2. Проверяет, что `www.apple.com` доступен с сервера по TLS 1.3 + HTTP/2 — без этого
    Reality не заработает.
 3. Ставит Marzban официальным скриптом Gozargah в `/opt/marzban` (compose + `.env`),
    данные в `/var/lib/marzban`.
@@ -134,7 +134,7 @@ sudo bash 02-install-marzban.sh
 Другой SNI — переменной:
 
 ```bash
-sudo REALITY_DEST=www.apple.com bash 02-install-marzban.sh
+sudo REALITY_DEST=www.samsung.com bash 02-install-marzban.sh
 ```
 
 Скрипт **идемпотентен**: повторный прогон переиспользует уже существующие ключи, `shortId`
@@ -179,7 +179,7 @@ sudo marzban cli admin create --sudo
 | | основной | резервный |
 |---|---|---|
 | порт | 443 | 8443 |
-| dest / serverNames | `www.microsoft.com:443` | `www.apple.com:443` |
+| dest / serverNames | `www.apple.com:443` | `www.apple.com:443` |
 | network | tcp | tcp |
 | security | reality | reality |
 | flow | `xtls-rprx-vision` (задаётся у пользователя) | то же |
@@ -217,7 +217,7 @@ bash 03-create-user.sh vn-phone
 
 ```
 vless://<uuid>@<IP>:443?security=reality&encryption=none&pbk=<publicKey>&fp=chrome
-&type=tcp&flow=xtls-rprx-vision&sni=www.microsoft.com&sid=<shortId>#vn-phone
+&type=tcp&flow=xtls-rprx-vision&sni=www.apple.com&sid=<shortId>#vn-phone
 ```
 
 Через UI то же самое: **Create User** → Proxies: `VLESS` → flow `xtls-rprx-vision` →
@@ -243,7 +243,7 @@ vless://<uuid>@<IP>:443?security=reality&encryption=none&pbk=<publicKey>&fp=chro
 **Streisand:** `+` → *Добавить из буфера обмена* / *Сканировать QR* → переключатель вверху.
 
 Проверь в клиенте, что подтянулись: `flow = xtls-rprx-vision`, `fingerprint = chrome`,
-`sni = www.microsoft.com`, `publicKey` и `shortId` непустые.
+`sni = www.apple.com`, `publicKey` и `shortId` непустые.
 
 Лучше импортировать **ссылку подписки** (`subscription_url` из шага 4), а не отдельный
 конфиг — тогда при смене SNI или порта клиент обновится сам. Для этого в
@@ -264,11 +264,15 @@ sudo marzban logs -n      # разовый дамп без слежения
 Ключевой тест маскировки — с любой машины:
 
 ```bash
-openssl s_client -connect <IP>:443 -servername www.microsoft.com </dev/null 2>/dev/null | grep subject
+openssl s_client -connect <IP>:443 -servername www.apple.com </dev/null 2>/dev/null | grep subject
 ```
 
-Должен вернуться сертификат **Microsoft**. Значит для DPI сервер неотличим от
-microsoft.com, и порт не палится сканером.
+Должен вернуться сертификат **Apple**. Значит для DPI сервер неотличим от
+apple.com, и порт не палится сканером.
+
+> Внимание: этот тест проверяет только **fallback**-путь Reality — то, что видит
+> неопознанный клиент. Он проходит даже когда настоящий туннель не работает.
+> Сквозная проверка — `08-selftest.sh`, см. «Если не работает».
 
 На телефоне с включённым VPN:
 1. `ifconfig.me` в браузере → должен показать IP сервера, не вьетнамский.
@@ -319,12 +323,19 @@ sudo bash 07-debug-log.sh off
 (не забудь обновить ссылку у клиента):
 
 ```bash
-sudo REALITY_DEST=www.yahoo.com bash 02-install-marzban.sh
-# альтернативы: www.amazon.com, www.bing.com, www.samsung.com, dl.google.com, www.icloud.com
+sudo REALITY_DEST=www.samsung.com bash 02-install-marzban.sh
+# альтернативы: www.apple.com, dl.google.com, www.icloud.com, www.amazon.com
 ```
 
 Правило выбора dest: чужой домен, TLS 1.3 + HTTP/2, не заблокирован во Вьетнаме,
 не CDN твоего же хостера и не популярный «палёный» вроде `www.google.com`.
+
+> **`www.microsoft.com` не годится.** На Xray 24.12.31 Reality-хендшейк с ним не
+> проходит: клиент подключается, трафик стоит. При этом сервер выглядит абсолютно
+> здоровым — порт слушает, `openssl s_client` снаружи отдаёт настоящий сертификат
+> Microsoft с `Verify return code: 0`, dest доступен по TLS1.3+H2. Ловится только
+> сквозным `08-selftest.sh`. Раньше он был дефолтом в этом репо — заменён на
+> `www.apple.com`, проверенный сквозным тестом.
 
 **Совсем нет коннекта на 443**
 Провайдер режет 443 к твоему IP или хостер фильтрует. Переключись на резервный инбаунд
