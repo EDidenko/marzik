@@ -60,8 +60,13 @@ FP="$(getp fp)"; FLOW="$(getp flow)"
 : "${FP:=chrome}"
 
 echo "==> Тестирую ровно то, что отдаётся клиенту"
-printf '    %s:%s  sni=%s  fp=%s  flow=%s  sid=%s\n' "$RHOST" "$RPORT" "$SNI" "$FP" "${FLOW:-<нет>}" "$SID"
+printf '    %s:%s  sni=%s  fp=%s  flow=%s  sid=%s\n' \
+  "$RHOST" "$RPORT" "$SNI" "$FP" "${FLOW:-<нет>}" "${SID:-<ПУСТО>}"
 [[ -n "$PBK" && -n "$SNI" ]] || { echo "!! В ссылке нет pbk/sni — сначала чини панель"; exit 1; }
+if [[ -z "$SID" ]]; then
+  echo "!! В ссылке пустой sid, а в конфиге shortIds непустой -> сервер такого клиента отвергнет."
+  echo "!! Сверь:  jq '.inbounds[].streamSettings.realitySettings.shortIds' ${SHARED}/xray_config.json"
+fi
 
 jq -n --arg uuid "$UUID" --arg host "$RHOST" --argjson port "$RPORT" \
       --arg sni "$SNI" --arg pbk "$PBK" --arg sid "$SID" --arg fp "$FP" \
@@ -106,8 +111,16 @@ echo
 if [[ -z "$OUT" ]]; then
   echo "РЕЗУЛЬТАТ: трафик через туннель НЕ ИДЁТ."
   echo "  Телефон ни при чём — проблема на сервере."
-  echo "  Включи подробный лог и повтори этот же тест:"
-  echo "    sudo bash 07-debug-log.sh on && sudo bash $0 ${USERNAME}"
+  echo
+  echo "--- лог клиента (${TESTC}) — здесь видно, на чём именно оборвалось ---"
+  docker logs "$TESTC" 2>&1 | tail -30
+  echo
+  echo "--- лог сервера (хвост Marzban/Xray) ---"
+  marzban logs -n 2>/dev/null | grep -viE 'GET /api/(system|admin)' | tail -30
+  echo
+  echo "Пусто с обеих сторон -> подключение до Xray вообще не доходит."
+  echo "Есть 'REALITY' / 'invalid' -> клиент не опознан (sid/pbk/sni)."
+  echo "Подробный лог ядра:  sudo bash $(dirname "$0")/07-debug-log.sh on"
   exit 1
 fi
 echo "РЕЗУЛЬТАТ: туннель РАБОТАЕТ. Внешний IP через туннель: ${OUT}"
