@@ -14,7 +14,8 @@ Reality не режется DPI Vinaphone/Viettel, потому что для н
 | `server/02-install-marzban.sh` | ставит Marzban, генерит ключи Reality, пишет `xray_config.json` |
 | `server/03-create-user.sh` | создаёт юзера через API, печатает `vless://` и QR |
 | `server/04-autoupdate.sh` | автообновление: `cron` (рекомендуется) или `watchtower` |
-| `server/05-check.sh` | диагностика: порты, логи, проверка маскировки снаружи |
+| `server/05-check.sh` | диагностика сервера: порты, логи, проверка маскировки снаружи |
+| `server/06-show-links.sh` | диагностика клиента: Hosts, теги, разобранная по параметрам `vless://` |
 | `server/marzban.env.example` | что должно быть в `/opt/marzban/.env` |
 | `server/xray_config.example.json` | эталон конфига Reality |
 | `server/optional-ws-cdn.md` | запасной канал VLESS+WS через Cloudflare (нужен домен) |
@@ -272,8 +273,22 @@ microsoft.com, и порт не палится сканером.
 ## Если не работает
 
 **Клиент подключается, но трафика нет / «handshake failure»**
-SNI забанен или недоступен с сервера. Перегони с другим dest — ключи, `shortId` и юзеры
-сохранятся, поменяется только SNI (не забудь обновить ссылку у клиента):
+
+Сначала раздели серверную и клиентскую стороны — это экономит часы:
+
+```bash
+sudo bash 05-check.sh          # сервер: порты, dest, маскировка снаружи
+bash 06-show-links.sh <юзер>   # клиент: что панель реально отдаёт в ссылке
+```
+
+Если `05-check.sh` показал сертификат нужного домена и `Verify return code: 0`, сервер
+исправен — смотри вывод `06-show-links.sh`. Пустой `fp` или пустой `sni` в Hosts дают
+ровно этот симптом: TLS-сессия встаёт, клиент пишет «подключено», трафик не идёт.
+Лечится в панели: **Hosts** → Address = IP сервера, **Fingerprint = chrome**.
+
+Если же сервер снаружи не отдаёт сертификат — SNI забанен или недоступен с сервера.
+Перегони с другим dest: ключи, `shortId` и юзеры сохранятся, поменяется только SNI
+(не забудь обновить ссылку у клиента):
 
 ```bash
 sudo REALITY_DEST=www.yahoo.com bash 02-install-marzban.sh

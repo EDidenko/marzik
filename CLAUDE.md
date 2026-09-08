@@ -43,7 +43,8 @@ with any script change).
 | `02-install-marzban.sh` | root | install Marzban via Gozargah's upstream script into `/opt/marzban`; generate x25519 keypair + `shortId`; write `/var/lib/marzban/xray_config.json`; patch `/opt/marzban/.env`; restart |
 | `03-create-user.sh` | any user (uses REST API) | POST `/api/admin/token` then `/api/user`; print `vless://` links + subscription URL + terminal QR |
 | `04-autoupdate.sh` | root | `cron` mode (weekly `marzban update`, recommended) or `watchtower` mode |
-| `05-check.sh` | root | diagnostics: containers, listening ports, UFW, logs, JSON validity, external Reality masquerade probe |
+| `05-check.sh` | root | server-side diagnostics: containers, listening ports, UFW, logs, JSON validity, Reality masquerade probe |
+| `06-show-links.sh` | any user (REST API) | client-side diagnostics: panel Hosts (address/sni/fingerprint), inbound tags, and each `vless://` link broken out param-by-param with the UUID masked |
 
 Key facts that span files:
 
@@ -67,6 +68,11 @@ Key facts that span files:
   any script; update them when the generator logic changes.
 - After first panel login the operator must set Fingerprint=`chrome` in **Hosts** — without
   `fp=chrome` many clients (iOS especially) fail. This is manual and documented in README §3.
+- **Debugging "client says connected but no traffic" splits in two**: `05-check.sh` proves the
+  server (a valid dest certificate returned on the VLESS port with `Verify return code: 0` means
+  Reality itself is fine), and `06-show-links.sh` proves what the panel hands the client. An
+  empty `fingerprint` or `sni` in Hosts produces exactly that symptom — the TLS session
+  establishes, so the client reports success while no data flows.
 - `optional-ws-cdn.md` is an unautomated fallback (VLESS+WS behind Cloudflare, needs a domain).
 
 ## State on the server (not in this repo)
