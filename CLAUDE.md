@@ -7,7 +7,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 A set of ordered bash scripts that provision a single VPS with the **Marzban** panel running
 **Xray-core**, configured for **VLESS + Reality over TCP/443**. The target audience is one
 person setting up a personal VPN for use inside Vietnam (DPI evasion via Reality masquerading
-as `www.microsoft.com`). No domain or TLS certificate required — it works on a bare IP.
+as a real third-party TLS site, `REALITY_DEST`). No domain or TLS certificate required — it
+works on a bare IP.
 
 There is no application code, build, or test suite. The deliverable is the scripts in `server/`
 plus `README.md` (written in Russian — it is the authoritative operator manual; keep it in sync
@@ -55,12 +56,15 @@ Key facts that span files:
 - **The generated `xray_config.json` has two inbounds sharing one keypair**: primary on 443
   (`REALITY_DEST`) and backup on 8443 (`REALITY_DEST_ALT`, which defaults to whatever the
   existing config already uses so changing the primary dest never breaks a working backup).
-- **`www.microsoft.com` is a known-bad dest** on Xray 24.12.31: the Reality handshake fails
-  while every indirect check stays green (port listens, external `openssl s_client` returns a
-  genuine Microsoft certificate with `Verify return code: 0`, dest reachable over TLS1.3+H2).
-  It was the repo default and was replaced with `www.apple.com`, verified end-to-end. When a
-  dest is suspect, A/B it with `LINK_INDEX=1 08-selftest.sh` — the two inbounds differ only in
-  port and dest, so a split result isolates the dest.
+- **Only `08-selftest.sh` can confirm a dest works.** Every indirect check stays green on a
+  broken one: the port listens, an external `openssl s_client` returns a genuine certificate
+  with `Verify return code: 0` (that probe only exercises Reality's fallback path), and the
+  dest answers TLS1.3+H2. The default dest is `www.apple.com` because it passed end-to-end;
+  `www.microsoft.com`, the previous default, did not — on a single confounded run, so treat
+  that as a reason to avoid it, not as an established property.
+- **A/B carefully**: the two inbounds differ in *both* port and dest, so `LINK_INDEX=1` alone
+  never isolates a variable. Use `SID_OVERRIDE` / `SNI_OVERRIDE` / `PORT_OVERRIDE` in
+  `08-selftest.sh` to change exactly one thing per run.
 - **`02-install-marzban.sh` is idempotent by design.** Re-running it (the documented way to
   change `REALITY_DEST`) must not break issued links, so it reuses the existing `privateKey`,
   `shortId`, and **inbound tags** read out of the current `xray_config.json`. Only `REGEN_KEYS=1`

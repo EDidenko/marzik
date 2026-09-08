@@ -76,6 +76,19 @@ while IFS= read -r L; do
   tr '&' '\n' <<<"$Q" | sed 's/^/    /'
 done < <(jq -r '.links[]' <<<"$USER_JSON")
 
+hr "shortIds в конфиге против sid в ссылке (5 запросов подряд)"
+# Если sid скачет между запросами, панель выбирает его случайно из списка, в котором
+# затесалась пустая строка, — и часть выданных ссылок окажется нерабочей.
+jq -r '.inbounds[] | "  конфиг \(.tag): \(.streamSettings.realitySettings.shortIds // [] | tostring)"' \
+  /var/lib/marzban/xray_config.json 2>/dev/null || echo "  (конфиг недоступен)"
+for n in 1 2 3 4 5; do
+  printf '  запрос %s:' "$n"
+  curl -sf "${API}/api/user/${USERNAME}" "${auth[@]}" \
+    | jq -r '.links[]? | capture("sid=(?<s>[^&#]*)").s // ""' \
+    | awk '{printf " [%s]", ($0=="" ? "ПУСТО" : $0)}'
+  echo
+done
+
 echo
 echo "Обязательно должны присутствовать: security=reality, pbk=, sid=, sni=,"
 echo "fp=chrome, flow=xtls-rprx-vision, type=tcp. Сверь pbk/sid с ~/marzban/reality.txt."

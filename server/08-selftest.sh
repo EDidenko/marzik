@@ -9,6 +9,11 @@
 #   sudo bash 08-selftest.sh [username]
 # Переменные: ADMIN_USER, ADMIN_PASS, PANEL_PORT=8000, SOCKS_PORT=10808, LINK_INDEX=0
 #
+# Для A/B — переопределения одного параметра за раз, поверх того, что отдала панель:
+#   SID_OVERRIDE=<hex>   SNI_OVERRIDE=<домен>   PORT_OVERRIDE=<порт>
+# Например, проверить порт 443 с заведомо верным sid, когда панель отдаёт пустой:
+#   sudo SID_OVERRIDE=d2f4... bash 08-selftest.sh iPhone
+#
 # Клиент запускается ВНУТРИ контейнера Marzban — тем же бинарником xray той же версии,
 # что и сервер, поэтому расхождения версий тест не исказят и образ качать не нужно.
 set -euo pipefail
@@ -58,6 +63,15 @@ getp(){ tr '&' '\n' <<<"$QUERY" | sed -n "s/^$1=//p" | head -1; }
 SNI="$(getp sni)"; PBK="$(getp pbk)"; SID="$(getp sid)"
 FP="$(getp fp)"; FLOW="$(getp flow)"
 : "${FP:=chrome}"
+
+# Переопределения для A/B: позволяют менять ОДНУ переменную за раз, когда панель
+# отдаёт битую ссылку. Форма ${VAR-...} (без двоеточия) намеренная — так можно
+# задать заведомо пустое значение, например SID_OVERRIDE= для проверки без sid.
+OVR=""
+[[ -n "${SNI_OVERRIDE:-}"  ]] && { SNI="$SNI_OVERRIDE";   OVR+=" sni"; }
+[[ -n "${PORT_OVERRIDE:-}" ]] && { RPORT="$PORT_OVERRIDE"; OVR+=" port"; }
+if [[ -n "${SID_OVERRIDE+x}" ]]; then SID="$SID_OVERRIDE"; OVR+=" sid"; fi
+[[ -z "$OVR" ]] || echo "    (переопределено:${OVR})"
 
 echo "==> Тестирую ровно то, что отдаётся клиенту"
 printf '    %s:%s  sni=%s  fp=%s  flow=%s  sid=%s\n' \
