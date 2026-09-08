@@ -46,6 +46,7 @@ with any script change).
 | `05-check.sh` | root | server-side diagnostics: containers, listening ports, UFW, logs, JSON validity, Reality masquerade probe |
 | `06-show-links.sh` | any user (REST API) | client-side diagnostics: panel Hosts (address/sni/fingerprint), inbound tags, and each `vless://` link broken out param-by-param with the UUID masked |
 | `07-debug-log.sh` | root | `on`/`off` toggle for `log.loglevel=debug` + `realitySettings.show=true`, backing the config up to `.predebug` and restoring it on `off` |
+| `08-selftest.sh` | root | end-to-end proof: parses the user's own `vless://` link, writes a client config to the `/var/lib/marzban` bind mount, runs `xray` inside the Marzban container (same binary, same version), and curls out through the resulting SOCKS port |
 
 Key facts that span files:
 
@@ -72,7 +73,10 @@ Key facts that span files:
 - **Debugging "client says connected but no traffic" has a fixed order**: `05-check.sh` proves
   the server (a valid dest certificate on the VLESS port with `Verify return code: 0` means
   Reality's server side is fine), `06-show-links.sh` proves what the panel hands the client,
-  then `07-debug-log.sh on` makes the handshake itself visible. Empty `sni`/`fingerprint` in
+  `08-selftest.sh` proves the whole path end-to-end without the phone, and `07-debug-log.sh on`
+  makes the handshake itself visible when the self-test fails. Note that an external
+  `openssl s_client` probe only exercises Reality's **fallback** path — it says nothing about
+  whether a real client can get through, which is why `08-selftest.sh` exists. Empty `sni`/`fingerprint` in
   Hosts is **not** a fault — Marzban inherits them from the inbound; only the generated
   `vless://` is authoritative.
 - **The `freedom` outbound's `domainStrategy` is auto-selected from the host**: `UseIPv4` when
