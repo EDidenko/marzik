@@ -50,9 +50,15 @@ Key facts that span files:
 - **UFW works because Marzban runs `network_mode: host`.** With normal Docker `ports:` mapping,
   container traffic would bypass UFW via Docker's iptables chains.
 - **The generated `xray_config.json` has two inbounds sharing one keypair**: primary on 443
-  (`serverNames: www.microsoft.com`) and backup on 8443 (`www.apple.com`). Both are referenced
-  by tag (`"VLESS TCP REALITY"`, `"VLESS TCP REALITY BACKUP"`) in `03-create-user.sh` and by
-  the Marzban panel. Renaming a tag means updating all three places.
+  (`serverNames: www.microsoft.com`) and backup on 8443 (`www.apple.com`).
+- **`02-install-marzban.sh` is idempotent by design.** Re-running it (the documented way to
+  change `REALITY_DEST`) must not break issued links, so it reuses the existing `privateKey`,
+  `shortId`, and **inbound tags** read out of the current `xray_config.json`. Only `REGEN_KEYS=1`
+  mints a new pair. Its "is port 443 free" guard deliberately tolerates a listener named `xray`
+  (our own) and rejects anything else. Keep all of this when editing.
+- Inbound tags are therefore **not fixed strings** — deployed servers vary (`VLESS TCP REALITY`
+  vs `VLESS_TCP_REALITY`). `03-create-user.sh` reads them from `GET /api/inbounds` rather than
+  hardcoding; never reintroduce a literal tag list.
 - `shortIds` intentionally never contains an empty string (that would allow connecting without
   a `sid`).
 - The x25519 parser in `02-install-marzban.sh` handles both Xray output formats

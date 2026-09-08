@@ -3,6 +3,11 @@
 # Запуск:  bash 02-install-marzban.sh
 # Переменные:
 #   REALITY_DEST=www.microsoft.com  VLESS_PORT=443  VLESS_PORT_ALT=8443  PANEL_PORT=8000
+#   REGEN_KEYS=1        сгенерировать НОВУЮ пару x25519 и shortId (ломает все выданные ссылки)
+#   TAG_MAIN / TAG_ALT  теги инбаундов; по умолчанию берутся из существующего конфига
+#
+# Скрипт идемпотентен: повторный прогон (например, чтобы сменить REALITY_DEST) сохраняет
+# ключи, shortId и теги инбаундов, поэтому ссылки и привязки юзеров в панели переживают его.
 set -euo pipefail
 
 REALITY_DEST="${REALITY_DEST:-www.microsoft.com}"
@@ -30,9 +35,23 @@ OUT_OWNER="${OUT_OWNER:-root}"
 install -d -m 700 -o "$OUT_OWNER" -g "$(id -gn "$OUT_OWNER")" "$OUT_DIR"
 
 echo "==> Проверка, что порт ${VLESS_PORT} свободен"
-if ss -lntH "sport = :${VLESS_PORT}" | grep -q .; then
-  echo "!! Порт ${VLESS_PORT} занят:"; ss -lntp "sport = :${VLESS_PORT}"
-  echo "!! Останови сервис (nginx/apache/caddy) или запусти с VLESS_PORT=8443"; exit 1
+# Повторный прогон — штатный сценарий (смена dest/SNI). Наш собственный xray на этом порту
+# помехой не является: он всё равно будет перезапущен в конце. Ругаемся только на чужой процесс.
+PORT_HOLDER=""
+PORT_LINE="$(ss -lntpH "sport = :${VLESS_PORT}" 2>/dev/null || true)"
+if [[ -n "$PORT_LINE" ]]; then
+  # users:(("xray",pid=123,fd=6)) -> первый токен в кавычках это имя процесса
+  PORT_HOLDER="$(printf '%s\n' "$PORT_LINE" | grep -oE '"[^"]+"' | head -1 | tr -d '"')"
+  PORT_HOLDER="${PORT_HOLDER:-unknown}"
+fi
+if [[ -n "$PORT_HOLDER" ]]; then
+  if [[ "$PORT_HOLDER" == "xray" ]]; then
+    echo "    порт держит наш xray — повторный прогон, продолжаю"
+  else
+    echo "!! Порт ${VLESS_PORT} занят процессом ${PORT_HOLDER}:"
+    ss -lntp "sport = :${VLESS_PORT}"
+    echo "!! Останови сервис (nginx/apache/caddy) или запусти с VLESS_PORT=8443"; exit 1
+  fi
 fi
 
 echo "==> Проверка dest: ${REALITY_DEST} должен отдавать TLS 1.3 + HTTP/2"
@@ -48,14 +67,48 @@ else
   echo "    Marzban уже установлен в /opt/marzban"
 fi
 
-echo "==> Генерация ключей Reality (x25519) и shortId"
 XRAY_BIN="docker compose -f ${COMPOSE} exec -T marzban xray"
-KEYS="$($XRAY_BIN x25519 2>/dev/null || docker run --rm ghcr.io/xtls/xray-core:latest x25519)"
 # Xray <25.x печатает 'Private key/Public key', >=25.x — 'PrivateKey/Password'.
-PRIVATE_KEY="$(echo "$KEYS" | grep -iE '^ *private' | sed 's/.*: *//' | tr -d ' \r')"
-PUBLIC_KEY="$(echo  "$KEYS" | grep -iE '^ *(public|password)' | sed 's/.*: *//' | tr -d ' \r')"
-SHORT_ID="$(openssl rand -hex 8)"
-[[ -n "$PRIVATE_KEY" && -n "$PUBLIC_KEY" ]] || { echo "!! Не смог разобрать вывод x25519:"; echo "$KEYS"; exit 1; }
+parse_priv(){ grep -iE '^ *private' | sed 's/.*: *//' | tr -d ' \r' | head -1; }
+parse_pub(){  grep -iE '^ *(public|password)' | sed 's/.*: *//' | tr -d ' \r' | head -1; }
+xray_x25519(){ # аргументы прокидываются в команду x25519
+  $XRAY_BIN x25519 "$@" 2>/dev/null \
+    || docker run --rm ghcr.io/xtls/xray-core:latest x25519 "$@"
+}
+
+# Теги инбаундов: если конфиг уже есть — оставляем его теги, иначе юзеры в панели,
+# привязанные к старым тегам, потеряют все ссылки.
+if [[ -z "${TAG_MAIN:-}" && -f "$XRAYJSON" ]]; then
+  TAG_MAIN="$(jq -r '.inbounds[0].tag // empty' "$XRAYJSON" 2>/dev/null || true)"
+  TAG_ALT="${TAG_ALT:-$(jq -r '.inbounds[1].tag // empty' "$XRAYJSON" 2>/dev/null || true)}"
+fi
+TAG_MAIN="${TAG_MAIN:-VLESS TCP REALITY}"
+TAG_ALT="${TAG_ALT:-${TAG_MAIN} BACKUP}"
+
+echo "==> Ключи Reality (x25519) и shortId"
+OLD_PRIV=""; OLD_SID=""
+if [[ -f "$XRAYJSON" ]]; then
+  OLD_PRIV="$(jq -r '[.inbounds[]?.streamSettings?.realitySettings?.privateKey // empty][0] // empty' "$XRAYJSON" 2>/dev/null || true)"
+  OLD_SID="$( jq -r '[.inbounds[]?.streamSettings?.realitySettings?.shortIds[0]? // empty][0] // empty' "$XRAYJSON" 2>/dev/null || true)"
+fi
+
+if [[ -n "$OLD_PRIV" && "${REGEN_KEYS:-0}" != "1" ]]; then
+  echo "    переиспользую существующую пару — выданные ссылки останутся рабочими"
+  echo "    (принудительно новая пара:  REGEN_KEYS=1 bash $0)"
+  PRIVATE_KEY="$OLD_PRIV"
+  SHORT_ID="${OLD_SID:-$(openssl rand -hex 8)}"
+  PUBLIC_KEY="$(xray_x25519 -i "$PRIVATE_KEY" | parse_pub)"
+  [[ -n "$PUBLIC_KEY" ]] || {
+    echo "!! Не смог вывести publicKey из существующего privateKey (старая версия xray?)."
+    echo "!! Либо возьми pbk из прошлого reality.txt, либо перегенерируй: REGEN_KEYS=1 bash $0"; exit 1; }
+else
+  echo "    генерирую новую пару"
+  KEYS="$(xray_x25519)"
+  PRIVATE_KEY="$(printf '%s\n' "$KEYS" | parse_priv)"
+  PUBLIC_KEY="$( printf '%s\n' "$KEYS" | parse_pub)"
+  SHORT_ID="$(openssl rand -hex 8)"
+  [[ -n "$PRIVATE_KEY" && -n "$PUBLIC_KEY" ]] || { echo "!! Не смог разобрать вывод x25519:"; echo "$KEYS"; exit 1; }
+fi
 
 echo "==> Запись ${XRAYJSON}"
 mkdir -p /var/lib/marzban
@@ -65,7 +118,7 @@ cat >"$XRAYJSON" <<EOF
   "log": { "loglevel": "warning" },
   "inbounds": [
     {
-      "tag": "VLESS TCP REALITY",
+      "tag": "${TAG_MAIN}",
       "listen": "0.0.0.0",
       "port": ${VLESS_PORT},
       "protocol": "vless",
@@ -86,7 +139,7 @@ cat >"$XRAYJSON" <<EOF
       "sniffing": { "enabled": true, "destOverride": ["http", "tls", "quic"] }
     },
     {
-      "tag": "VLESS TCP REALITY BACKUP",
+      "tag": "${TAG_ALT}",
       "listen": "0.0.0.0",
       "port": ${VLESS_PORT_ALT},
       "protocol": "vless",
@@ -129,7 +182,17 @@ set_env() { # key value
     echo "$1 = $2" >>"$ENVFILE"
   fi
 }
-set_env UVICORN_HOST '"0.0.0.0"'
+# Значение, которое оператор мог выставить осознанно, повторный прогон затирать не должен:
+# UVICORN_HOST = "127.0.0.1" прячет панель за SSH-туннель, и вернуть её на 0.0.0.0 молча —
+# значит выставить логин/пароль в интернет по голому HTTP.
+set_env_default() { # key value
+  if grep -qE "^\s*$1\s*=" "$ENVFILE"; then
+    echo "    $1 уже задан в ${ENVFILE} — не трогаю"
+  else
+    set_env "$1" "$2"
+  fi
+}
+set_env_default UVICORN_HOST '"0.0.0.0"'
 set_env UVICORN_PORT "${PANEL_PORT}"
 set_env XRAY_JSON '"/var/lib/marzban/xray_config.json"'
 
@@ -145,7 +208,7 @@ publicKey  (pbk)  : ${PUBLIC_KEY}
 shortId    (sid)  : ${SHORT_ID}
 flow              : xtls-rprx-vision
 fingerprint (fp)  : chrome
-inbound tags      : "VLESS TCP REALITY", "VLESS TCP REALITY BACKUP"
+inbound tags      : "${TAG_MAIN}", "${TAG_ALT}"
 EOF
 chmod 600 "${OUT_DIR}/reality.txt"
 chown "$OUT_OWNER" "${OUT_DIR}/reality.txt"

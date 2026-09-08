@@ -40,17 +40,22 @@ TOKEN="$(curl -sf -X POST "${API}/api/admin/token" \
 [[ -n "$TOKEN" && "$TOKEN" != "null" ]] || { echo "!! Не авторизовался. Создай админа: marzban cli admin create --sudo"; exit 1; }
 
 echo "==> Доступные inbound-теги"
-curl -sf "${API}/api/inbounds" -H "Authorization: Bearer ${TOKEN}" | jq -r '.vless[]?.tag' || true
+# Теги берём у панели, а не хардкодим: 02-install-marzban.sh сохраняет теги существующего
+# конфига, поэтому на разных серверах они могут отличаться.
+TAGS_JSON="$(curl -sf "${API}/api/inbounds" -H "Authorization: Bearer ${TOKEN}" | jq -c '[.vless[]?.tag]' || echo '[]')"
+echo "$TAGS_JSON" | jq -r '.[]'
+[[ "$(echo "$TAGS_JSON" | jq 'length')" -gt 0 ]] \
+  || { echo "!! В панели нет VLESS-инбаундов. Проверь /var/lib/marzban/xray_config.json"; exit 1; }
 
 echo "==> Создаю пользователя ${USERNAME}"
-PAYLOAD=$(jq -n --arg u "$USERNAME" '{
+PAYLOAD=$(jq -n --arg u "$USERNAME" --argjson tags "$TAGS_JSON" '{
   username: $u,
   status: "active",
   expire: 0,
   data_limit: 0,
   data_limit_reset_strategy: "no_reset",
   proxies: { vless: { flow: "xtls-rprx-vision" } },
-  inbounds: { vless: ["VLESS TCP REALITY", "VLESS TCP REALITY BACKUP"] },
+  inbounds: { vless: $tags },
   note: "created by 03-create-user.sh"
 }')
 
