@@ -17,6 +17,7 @@
           "xver": 0,
           "serverNames": ["www.apple.com"],
           "privateKey": "<ВЫВОД xray x25519 — private>",
+          "publicKey": "<ВЫВОД xray x25519 — public/password>",
           "shortIds": ["<openssl rand -hex 8>"]
         }
       },

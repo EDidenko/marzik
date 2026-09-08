@@ -61,6 +61,16 @@ Key facts that span files:
   fails. Clients from 2025 on offer `X25519MLKEM768` in the ClientHello under `fp=chrome`, and
   cores before 25.x cannot process it. When the self-test passes but real devices do not, check
   the core version first (`05-check.sh` warns) and `marzban core-update`.
+- **`publicKey` must stay in the generated `realitySettings`, even though a Reality *server*
+  does not need it.** Marzban's `_resolve_inbounds` reads `tls_settings['publicKey']` to build
+  the link's `pbk`; when the key is absent it shells out to `xray x25519 -i` and parses the
+  output, and that parser breaks on newer cores (26.x), taking the whole app down in a crash
+  loop at import time — not just Xray. Writing the key into the config skips that path
+  entirely. `02-install-marzban.sh` also reads it back on re-runs instead of re-deriving.
+- **`02-install-marzban.sh` verifies Marzban is actually up after restarting it.** `marzban
+  restart` prints success and can still crash-loop, so the script polls container status plus
+  the panel port and dumps the log tail on failure. Do not remove this: a script that reports
+  "Reality готов" over a dead service is worse than one that fails loudly.
 - **`marzban core-update` silently does nothing if `XRAY_EXECUTABLE_PATH` points at the
   image's own binary.** The updater writes to `/var/lib/marzban/xray-core/xray` but never
   touches `.env`, so it reports success while the old core keeps running. `05-check.sh`

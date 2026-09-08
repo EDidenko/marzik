@@ -360,6 +360,22 @@ apt-get -y install iptables-persistent && netfilter-persistent save
 `ss -lntp | grep 8000` — слушает ли; `ufw status` — открыт ли порт;
 `marzban logs | tail -50` — не упал ли контейнер.
 
+**Marzban падает в crash-loop после обновления ядра**
+
+В логе `TypeError: 'NoneType' object is not subscriptable` в `app/xray/config.py`, строка
+`settings['pbk'] = x25519['public_key']`. Marzban строит `pbk` для ссылки так: сначала
+берёт `publicKey` из `realitySettings`, а если его там нет — вызывает `xray x25519 -i` и
+разбирает вывод. У ядер 26.x формат вывода другой, разбор возвращает `None`, и падает
+всё приложение целиком, а не только Xray.
+
+Лечится тем, что `02-install-marzban.sh` пишет `publicKey` прямо в конфиг — тогда ветка
+с вызовом `xray` не выполняется. Просто перегони скрипт. Аварийный откат на ядро из
+docker-образа, если сервер нужен немедленно:
+
+```bash
+sudo sed -i '/XRAY_EXECUTABLE_PATH/d' /opt/marzban/.env && sudo marzban restart -n
+```
+
 **Сервер проходит `08-selftest.sh`, а телефон/ноутбук — нет**
 
 Почти наверняка старое ядро Xray. Клиенты 2025+ с `fp=chrome` предлагают в ClientHello

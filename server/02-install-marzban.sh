@@ -119,9 +119,10 @@ fi
 echo "==> Исходящая стратегия freedom: ${FREEDOM_STRATEGY} (переопределить: FREEDOM_STRATEGY=...)"
 
 echo "==> Ключи Reality (x25519) и shortId"
-OLD_PRIV=""; OLD_SID=""
+OLD_PRIV=""; OLD_SID=""; OLD_PUB=""
 if [[ -f "$XRAYJSON" ]]; then
   OLD_PRIV="$(jq -r '[.inbounds[]?.streamSettings?.realitySettings?.privateKey // empty][0] // empty' "$XRAYJSON" 2>/dev/null || true)"
+  OLD_PUB="$( jq -r '[.inbounds[]?.streamSettings?.realitySettings?.publicKey  // empty][0] // empty' "$XRAYJSON" 2>/dev/null || true)"
   OLD_SID="$( jq -r '[.inbounds[]?.streamSettings?.realitySettings?.shortIds[0]? // empty][0] // empty' "$XRAYJSON" 2>/dev/null || true)"
 fi
 
@@ -130,7 +131,13 @@ if [[ -n "$OLD_PRIV" && "${REGEN_KEYS:-0}" != "1" ]]; then
   echo "    (принудительно новая пара:  REGEN_KEYS=1 bash $0)"
   PRIVATE_KEY="$OLD_PRIV"
   SHORT_ID="${OLD_SID:-$(openssl rand -hex 8)}"
-  PUBLIC_KEY="$(xray_x25519 -i "$PRIVATE_KEY" | parse_pub)"
+  # publicKey уже в конфиге — берём оттуда: вызов `xray x25519 -i` лишний, а его формат
+  # вывода меняется от версии к версии и уже ломался.
+  if [[ -n "$OLD_PUB" ]]; then
+    PUBLIC_KEY="$OLD_PUB"
+  else
+    PUBLIC_KEY="$(xray_x25519 -i "$PRIVATE_KEY" | parse_pub)"
+  fi
   [[ -n "$PUBLIC_KEY" ]] || {
     echo "!! Не смог вывести publicKey из существующего privateKey (старая версия xray?)."
     echo "!! Либо возьми pbk из прошлого reality.txt, либо перегенерируй: REGEN_KEYS=1 bash $0"; exit 1; }
@@ -166,6 +173,7 @@ cat >"$XRAYJSON" <<EOF
           "xver": 0,
           "serverNames": ["${REALITY_DEST}"],
           "privateKey": "${PRIVATE_KEY}",
+          "publicKey": "${PUBLIC_KEY}",
           "shortIds": ["${SHORT_ID}"]
         }
       },
@@ -187,6 +195,7 @@ cat >"$XRAYJSON" <<EOF
           "xver": 0,
           "serverNames": ["${REALITY_DEST_ALT}"],
           "privateKey": "${PRIVATE_KEY}",
+          "publicKey": "${PUBLIC_KEY}",
           "shortIds": ["${SHORT_ID}"]
         }
       },
@@ -240,7 +249,27 @@ fi
 echo "==> Перезапуск"
 marzban restart -n || docker compose -f "$COMPOSE" up -d --force-recreate
 
-sleep 5
+# Marzban печатает «successfully restarted» и может тут же уйти в crash-loop — например,
+# не сумев разобрать конфиг. Без этой проверки скрипт отрапортует об успехе, а сервис
+# будет лежать, и узнаешь об этом уже из Вьетнама.
+echo "==> Проверка, что Marzban действительно поднялся"
+UP=0; ST=""
+for _ in $(seq 1 20); do
+  sleep 2
+  ST="$(docker ps -a --filter name=marzban --format '{{.Status}}' | head -1)"
+  if [[ "$ST" == Up* ]] && ss -lntH "sport = :${PANEL_PORT}" 2>/dev/null | grep -q .; then
+    UP=1; break
+  fi
+done
+if [[ "$UP" != 1 ]]; then
+  echo "!! Marzban не поднялся (статус: ${ST:-контейнера нет}). Хвост лога:"
+  marzban logs -n 2>/dev/null | tail -30
+  echo
+  echo "!! Предыдущий конфиг сохранён: $(ls -t ${XRAYJSON}.bak.* 2>/dev/null | head -1)"
+  exit 1
+fi
+echo "    ok, $(marzban logs -n 2>/dev/null | grep -oE 'Xray core [0-9][0-9.]*' | tail -1)"
+
 cat >"${OUT_DIR}/reality.txt" <<EOF
 dest / SNI        : ${REALITY_DEST}
 port              : ${VLESS_PORT} (backup ${VLESS_PORT_ALT}, SNI ${REALITY_DEST_ALT})
