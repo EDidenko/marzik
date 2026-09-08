@@ -4,6 +4,8 @@
 # Переменные окружения (все опциональны):
 #   SSH_PORT=22 PANEL_PORT=8000 VLESS_PORT=443 VLESS_PORT_ALT=8443
 #   HARDEN_SSH=1 DEPLOY_USER=deploy
+#   EXTRA_PORTS="80,443"  дополнительно открыть (порты уже работающих сайтов)
+#   UFW_RESET=0|1|auto    auto (по умолчанию): сбрасывать правила только если UFW неактивен
 set -euo pipefail
 
 SSH_PORT="${SSH_PORT:-22}"
@@ -43,13 +45,31 @@ sysctl --system >/dev/null
 echo "    congestion control: $(sysctl -n net.ipv4.tcp_congestion_control)"
 
 echo "==> UFW"
-ufw --force reset >/dev/null
-ufw default deny incoming  >/dev/null
-ufw default allow outgoing >/dev/null
+# Сброс правил допустим только на чистой машине. Если UFW уже настроен (сервер с сайтами),
+# reset снёс бы в том числе :80 — HTTP и обновление сертификатов Let's Encrypt встали бы.
+# Поэтому на активном фаерволе правила только ДОБАВЛЯЮТСЯ.
+UFW_RESET="${UFW_RESET:-auto}"
+if [[ "$UFW_RESET" == "auto" ]]; then
+  if ufw status 2>/dev/null | grep -q '^Status: active'; then UFW_RESET=0; else UFW_RESET=1; fi
+fi
+if [[ "$UFW_RESET" == "1" ]]; then
+  ufw --force reset >/dev/null
+  ufw default deny incoming  >/dev/null
+  ufw default allow outgoing >/dev/null
+else
+  echo "    UFW уже активен — существующие правила НЕ трогаю, только добавляю свои"
+  echo "    (начать с нуля: UFW_RESET=1 bash $0)"
+fi
 ufw allow "${SSH_PORT}"/tcp        comment 'SSH'
 ufw allow "${VLESS_PORT}"/tcp      comment 'VLESS Reality'
 ufw allow "${VLESS_PORT_ALT}"/tcp  comment 'VLESS Reality backup'
 ufw allow "${PANEL_PORT}"/tcp      comment 'Marzban panel'
+# Порты, которые нельзя потерять на живом сервере: EXTRA_PORTS="80,443"
+IFS=',' read -ra EXTRA <<<"${EXTRA_PORTS:-}" || true
+for p in "${EXTRA[@]:-}"; do
+  [[ -n "${p// /}" ]] || continue
+  ufw allow "${p// /}"/tcp comment 'extra'
+done
 ufw --force enable
 ufw status numbered
 

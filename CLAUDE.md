@@ -29,6 +29,11 @@ with any script change).
 - **Secrets (`reality.txt`, `*-links.txt`, `*-qr.png`) are written to the invoking user's home
   (`$SUDO_USER`'s `~/marzban/`), mode 600/700, chowned back to that user — never to `/root`.**
   This is deliberate so the passwordless `deploy` user can read them without sudo. Keep it.
+- **`01-bootstrap.sh` must never clobber an existing firewall.** `UFW_RESET` defaults to
+  `auto`: it resets only when UFW is inactive, because a reset on a server running websites
+  drops port 80 along with everything else. `EXTRA_PORTS="80,443"` adds ports the box already
+  needs. The repo supports installing alongside nginx by moving Reality to free ports
+  (`VLESS_PORT`/`VLESS_PORT_ALT`) — see the README section on that.
 - Scripts that touch sshd (`01-bootstrap.sh` with `HARDEN_SSH=1`) must stay fail-safe: verify a
   working key-based non-root login exists before locking `PermitRootLogin`, run `sshd -t` before
   restart, and always print the rollback command. Do not weaken these guards.

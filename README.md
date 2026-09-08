@@ -397,6 +397,56 @@ sudo bash 05-check.sh          # секция «Версия ядра Xray» н�
 
 ---
 
+## Вариант: подселить на сервер, где уже есть nginx и сайты
+
+Reality слушает свободные порты, nginx остаётся единственным владельцем 80 и 443.
+Конфигурацию сайтов менять не нужно вообще.
+
+> **Главное про фаервол.** `01-bootstrap.sh` настраивает UFW. Если UFW уже активен, правила
+> он не сбрасывает (`UFW_RESET=auto`), но порты сайтов всё равно перечисли явно: на машине
+> с выключенным UFW скрипт включит его — и без `EXTRA_PORTS` закроет 80, положив HTTP и
+> обновление сертификатов Let's Encrypt.
+
+```bash
+# Шаг 0 пропусти, если рабочий пользователь на сервере уже есть.
+
+# 1. Docker, BBR, UFW. Сайты остаются доступны.
+sudo EXTRA_PORTS="80,443" VLESS_PORT=8443 VLESS_PORT_ALT=2053 bash 01-bootstrap.sh
+
+# 2. Marzban + Reality на свободных портах. 443 не трогается: проверка занятости
+#    смотрит только на VLESS_PORT.
+sudo VLESS_PORT=8443 VLESS_PORT_ALT=2053 bash 02-install-marzban.sh
+
+# 3. Свежее ядро. Docker-образ приносит старое, с ним современные клиенты не подключаются.
+sudo marzban core-update          # выбрать самую свежую версию
+sudo VLESS_PORT=8443 VLESS_PORT_ALT=2053 bash 02-install-marzban.sh   # пропишет путь к ядру
+
+# 4. Админ, пользователь, проверка.
+sudo marzban cli admin create --sudo
+bash 03-create-user.sh phone
+sudo VLESS_PORT=8443 VLESS_PORT_ALT=2053 bash 05-check.sh
+sudo bash 08-selftest.sh phone
+```
+
+Второй прогон `02` на шаге 3 обязателен: он проставляет `XRAY_EXECUTABLE_PATH` на скачанное
+ядро (без этого `core-update` молча не применяется) и кладёт `publicKey` в конфиг (без него
+Marzban с ядром 26.x падает в crash-loop). Прогон идемпотентен — ключи и ссылки не меняются.
+
+Почему 8443 и 2053: оба обычно не заблокированы и входят в список портов, которые проксирует
+Cloudflare, — пригодится, если позже понадобится `optional-ws-cdn.md`.
+
+После установки убедись, что nginx не задет:
+
+```bash
+sudo nginx -t
+curl -sI https://твой-домен/ | head -1
+sudo ss -lntp | grep -E ':(80|443|8443|2053)\b'
+```
+
+Порт 8000 наружу не нужен — Marzban без `UVICORN_SSL_*` слушает только 127.0.0.1.
+Правило можно убрать: `sudo ufw delete allow 8000/tcp`, а в панель ходить туннелем
+`ssh -N -L 8000:127.0.0.1:8000 <user>@<IP>`.
+
 ## Автообновление
 
 ```bash
