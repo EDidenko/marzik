@@ -85,6 +85,18 @@ fi
 TAG_MAIN="${TAG_MAIN:-VLESS TCP REALITY}"
 TAG_ALT="${TAG_ALT:-${TAG_MAIN} BACKUP}"
 
+# На IPv4-only сервере дефолтный freedom (domainStrategy: AsIs) отдаёт имя системному
+# диалеру, тот видит AAAA и уходит в IPv6, которого нет, — соединения виснут, а внешне
+# всё здорово: порт слушает, хендшейк проходит, трафика нет. UseIPv4 это снимает.
+if [[ -z "${FREEDOM_STRATEGY:-}" ]]; then
+  if ip -6 addr show scope global 2>/dev/null | grep -q inet6; then
+    FREEDOM_STRATEGY="AsIs"
+  else
+    FREEDOM_STRATEGY="UseIPv4"
+  fi
+fi
+echo "==> Исходящая стратегия freedom: ${FREEDOM_STRATEGY} (переопределить: FREEDOM_STRATEGY=...)"
+
 echo "==> Ключи Reality (x25519) и shortId"
 OLD_PRIV=""; OLD_SID=""
 if [[ -f "$XRAYJSON" ]]; then
@@ -161,7 +173,7 @@ cat >"$XRAYJSON" <<EOF
     }
   ],
   "outbounds": [
-    { "protocol": "freedom", "tag": "DIRECT" },
+    { "protocol": "freedom", "tag": "DIRECT", "settings": { "domainStrategy": "${FREEDOM_STRATEGY}" } },
     { "protocol": "blackhole", "tag": "BLOCK" }
   ],
   "routing": {

@@ -75,6 +75,13 @@ Key facts that span files:
   then `07-debug-log.sh on` makes the handshake itself visible. Empty `sni`/`fingerprint` in
   Hosts is **not** a fault — Marzban inherits them from the inbound; only the generated
   `vless://` is authoritative.
+- **The `freedom` outbound's `domainStrategy` is auto-selected from the host**: `UseIPv4` when
+  there is no global IPv6 address, `AsIs` otherwise (`FREEDOM_STRATEGY` overrides). Xray's
+  default `AsIs` on an IPv4-only VPS follows AAAA records into unreachable IPv6 and hangs,
+  which looks identical to a healthy server from every external test.
+- **`getent hosts` is not a valid DNS check** — glibc tries `AF_INET6` first and prints only
+  AAAA when they exist, so it looks like A records are missing. Use `getent ahostsv4` /
+  `ahostsv6` separately, as `05-check.sh` does.
 - **Reality failures are silent by default.** At `loglevel: warning` with `show: false`, a
   rejected handshake logs nothing at all, so `marzban logs` shows only panel API lines and
   looks healthy. Anything that raises `realitySettings.show` must use a

@@ -52,9 +52,21 @@ else
   echo "хост IPv6  : адреса нет (нормально)"
 fi
 CNAME="$(docker ps --format '{{.Names}}' | grep -i marzban | head -1)"
-printf 'DNS в контейнере: '
-docker exec "$CNAME" getent hosts www.google.com 2>/dev/null \
-  || echo "НЕ РЕЗОЛВИТСЯ — при sniffing+destOverride это ломает весь трафик"
+# Спрашиваем A и AAAA по отдельности: `getent hosts` пробует AF_INET6 первым и при
+# наличии AAAA печатает ТОЛЬКО их, из-за чего кажется, будто A-записей нет.
+A4="$(docker exec "$CNAME" getent ahostsv4 www.google.com 2>/dev/null | awk 'NR==1{print $1}')"
+A6="$(docker exec "$CNAME" getent ahostsv6 www.google.com 2>/dev/null | awk 'NR==1{print $1}')"
+echo "DNS в контейнере: A=${A4:-НЕТ}  AAAA=${A6:-нет}"
+[[ -n "$A4" ]] || echo "  !! A-записи не резолвятся — при sniffing+destOverride это ломает весь трафик"
+
+STRAT="$(jq -r '[.outbounds[]? | select(.protocol=="freedom") | .settings.domainStrategy // "AsIs"][0] // "AsIs"' \
+  /var/lib/marzban/xray_config.json 2>/dev/null)"
+echo "freedom domainStrategy: ${STRAT}"
+if [[ -z "${A6:-}" ]]; then :; elif ! ip -6 addr show scope global 2>/dev/null | grep -q inet6; then
+  [[ "$STRAT" == UseIPv4 ]] \
+    || echo "  !! У сервера нет IPv6, но домены резолвятся в AAAA, а strategy=${STRAT}." \
+            "Перегони 02-install-marzban.sh — он выставит UseIPv4."
+fi
 
 hr "Параметры Reality"
 find /root /home -maxdepth 3 -name reality.txt -path '*/marzban/*' 2>/dev/null \
