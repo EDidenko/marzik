@@ -221,6 +221,14 @@ set_env_default UVICORN_HOST '"0.0.0.0"'
 set_env UVICORN_PORT "${PANEL_PORT}"
 set_env XRAY_JSON '"/var/lib/marzban/xray_config.json"'
 
+# `marzban core-update` кладёт свежее ядро сюда, но .env не правит. Без явного пути
+# Marzban продолжит запускать бинарник из образа: установщик отрапортует об успехе,
+# а в логах останется старая версия. Проверяется секцией «Версия ядра» в 05-check.sh.
+if [[ -x /var/lib/marzban/xray-core/xray ]]; then
+  set_env XRAY_EXECUTABLE_PATH '"/var/lib/marzban/xray-core/xray"'
+  echo "    XRAY_EXECUTABLE_PATH -> /var/lib/marzban/xray-core/xray (ядро от core-update)"
+fi
+
 echo "==> Перезапуск"
 marzban restart -n || docker compose -f "$COMPOSE" up -d --force-recreate
 

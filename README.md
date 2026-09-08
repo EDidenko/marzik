@@ -404,6 +404,12 @@ sudo marzban backup                 # бэкап /var/lib/marzban
 docker ps                           # без sudo: deploy в группе docker
 ```
 
+> **`core-update` может отрапортовать об успехе, не применившись.** Он скачивает ядро
+> в `/var/lib/marzban/xray-core/xray`, но не трогает `XRAY_EXECUTABLE_PATH` в `.env` —
+> и если та не задана, Marzban продолжит запускать ядро из docker-образа. Проверяй
+> секцией «Версия ядра Xray» в `05-check.sh`: она сравнивает запущенную версию с той,
+> что лежит по этому пути. `02-install-marzban.sh` проставляет путь сам, если ядро есть.
+
 Забэкапить руками — достаточно скопировать `/var/lib/marzban` и `/opt/marzban/.env`:
 
 ```bash
