@@ -61,6 +61,14 @@ Key facts that span files:
   fails. Clients from 2025 on offer `X25519MLKEM768` in the ClientHello under `fp=chrome`, and
   cores before 25.x cannot process it. When the self-test passes but real devices do not, check
   the core version first (`05-check.sh` warns) and `marzban core-update`.
+- **`marzban core-update` silently does nothing if `XRAY_EXECUTABLE_PATH` points at the
+  image's own binary.** The updater writes to `/var/lib/marzban/xray-core/xray` but never
+  touches `.env`, so it reports success while the old core keeps running. `05-check.sh`
+  compares the running version against that path and says so.
+- **An empty `sid` in a generated link right after `marzban restart` is a race, not a fault** —
+  the panel serves links before the xray config is reread. `08-selftest.sh` polls until the
+  link's `sid` matches the config before testing; never diagnose off a link fetched seconds
+  after a restart.
 - **Only `08-selftest.sh` can confirm a dest works.** Every indirect check stays green on a
   broken one: the port listens, an external `openssl s_client` returns a genuine certificate
   with `Verify return code: 0` (that probe only exercises Reality's fallback path), and the

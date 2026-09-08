@@ -26,7 +26,23 @@ marzban logs -n 2>/dev/null | tail -40 \
 hr "Версия ядра Xray"
 CNAME0="$(docker ps --format '{{.Names}}' | grep -i marzban | head -1)"
 XV="$(docker exec "$CNAME0" xray version 2>/dev/null | awk 'NR==1{print $2}')"
-echo "  ${XV:-неизвестна}"
+echo "  запущено: ${XV:-неизвестна}"
+
+# `marzban core-update` кладёт новый бинарник сюда, но НЕ трогает XRAY_EXECUTABLE_PATH.
+# Если путь указывает на ядро из образа, обновление молча не применяется.
+EXEC_PATH="$(sed -n 's/^[[:space:]]*XRAY_EXECUTABLE_PATH[[:space:]]*=[[:space:]]*//p' \
+  /opt/marzban/.env 2>/dev/null | tr -d '"'"'"' ' | head -1)"
+echo "  XRAY_EXECUTABLE_PATH: ${EXEC_PATH:-(не задан — берётся xray из образа)}"
+ALT=/var/lib/marzban/xray-core/xray
+if docker exec "$CNAME0" test -x "$ALT" 2>/dev/null; then
+  AV="$(docker exec "$CNAME0" "$ALT" version 2>/dev/null | awk 'NR==1{print $2}')"
+  echo "  в ${ALT}: ${AV:-неизвестна}"
+  if [[ -n "$AV" && -n "$XV" && "$AV" != "$XV" ]]; then
+    echo "  !! core-update скачал ${AV}, но запущено ${XV} — обновление НЕ применилось."
+    echo "  !! Впиши в /opt/marzban/.env:  XRAY_EXECUTABLE_PATH = \"${ALT}\""
+    echo "  !! затем:  sudo marzban restart -n"
+  fi
+fi
 case "$XV" in
   1.*|2[0-4].*)
     echo "  !! Ядро старое. Клиенты 2025+ с fp=chrome предлагают в ClientHello постквантовый"

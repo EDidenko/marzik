@@ -48,9 +48,26 @@ TOKEN="$(curl -sf -X POST "${API}/api/admin/token" \
   | jq -r '.access_token' || true)"
 [[ -n "$TOKEN" && "$TOKEN" != "null" ]] || { echo "!! Не авторизовался в панели"; exit 1; }
 
-LINK="$(curl -sf "${API}/api/user/${USERNAME}" -H "Authorization: Bearer ${TOKEN}" \
-  | jq -r ".links[${LINK_INDEX}] // empty")"
+fetch_link(){
+  curl -sf "${API}/api/user/${USERNAME}" -H "Authorization: Bearer ${TOKEN}" \
+    | jq -r ".links[${LINK_INDEX}] // empty"
+}
+LINK="$(fetch_link)"
 [[ -n "$LINK" ]] || { echo "!! Нет ссылки #${LINK_INDEX} у ${USERNAME}"; exit 1; }
+
+# Сразу после `marzban restart` панель какое-то время отдаёт ссылку БЕЗ sid, хотя в
+# конфиге он есть. Это гонка перечитывания конфига, а не поломка: без ожидания тест
+# померит заведомо нерабочую ссылку и обвинит сервер.
+CFG_SID="$(jq -r '[.inbounds[]?.streamSettings?.realitySettings?.shortIds[0]? // empty][0] // empty' \
+  "${SHARED}/xray_config.json" 2>/dev/null || true)"
+if [[ -n "$CFG_SID" ]]; then
+  for _ in 1 2 3 4 5; do
+    grep -q "sid=${CFG_SID}" <<<"$LINK" && break
+    echo "    панель ещё отдаёт ссылку без sid (бывает сразу после restart) — жду 3с"
+    sleep 3
+    LINK="$(fetch_link)"
+  done
+fi
 
 # --- разбор vless://UUID@HOST:PORT?params#remark ---------------------------------
 BODY="${LINK#vless://}"; BODY="${BODY%%#*}"
