@@ -23,6 +23,18 @@ hr "Последние 40 строк логов Marzban/Xray"
 marzban logs -n 2>/dev/null | tail -40 \
   || docker logs --tail 40 "$(docker ps --format '{{.Names}}' | grep -i marzban | head -1)"
 
+hr "Версия ядра Xray"
+CNAME0="$(docker ps --format '{{.Names}}' | grep -i marzban | head -1)"
+XV="$(docker exec "$CNAME0" xray version 2>/dev/null | awk 'NR==1{print $2}')"
+echo "  ${XV:-неизвестна}"
+case "$XV" in
+  1.*|2[0-4].*)
+    echo "  !! Ядро старое. Клиенты 2025+ с fp=chrome предлагают в ClientHello постквантовый"
+    echo "  !! X25519MLKEM768, которого это ядро не понимает: Reality-хендшейк падает, хотя"
+    echo "  !! сервер полностью исправен и self-test старым клиентом проходит."
+    echo "  !! Лечится:  sudo marzban core-update && sudo marzban restart -n" ;;
+esac
+
 hr "Валидность xray_config.json"
 jq -e . /var/lib/marzban/xray_config.json >/dev/null && echo "JSON ok" || echo "JSON СЛОМАН"
 

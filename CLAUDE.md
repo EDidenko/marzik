@@ -56,6 +56,11 @@ Key facts that span files:
 - **The generated `xray_config.json` has two inbounds sharing one keypair**: primary on 443
   (`REALITY_DEST`) and backup on 8443 (`REALITY_DEST_ALT`, which defaults to whatever the
   existing config already uses so changing the primary dest never breaks a working backup).
+- **`08-selftest.sh` has one blind spot: the client it runs is the server's own Xray binary,**
+  so an old-core-vs-modern-client incompatibility passes the self-test while every real device
+  fails. Clients from 2025 on offer `X25519MLKEM768` in the ClientHello under `fp=chrome`, and
+  cores before 25.x cannot process it. When the self-test passes but real devices do not, check
+  the core version first (`05-check.sh` warns) and `marzban core-update`.
 - **Only `08-selftest.sh` can confirm a dest works.** Every indirect check stays green on a
   broken one: the port listens, an external `openssl s_client` returns a genuine certificate
   with `Verify return code: 0` (that probe only exercises Reality's fallback path), and the
