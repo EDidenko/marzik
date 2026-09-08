@@ -25,8 +25,13 @@ marzban logs -n 2>/dev/null | tail -40 \
 
 hr "Версия ядра Xray"
 CNAME0="$(docker ps --format '{{.Names}}' | grep -i marzban | head -1)"
-XV="$(docker exec "$CNAME0" xray version 2>/dev/null | awk 'NR==1{print $2}')"
-echo "  запущено: ${XV:-неизвестна}"
+# Что РЕАЛЬНО запущено, знает только лог Marzban: `docker exec xray version` выполняет
+# бинарник ИЗ ОБРАЗА, а Marzban стартует тот, на который смотрит XRAY_EXECUTABLE_PATH.
+# Спрашивать про версию через docker exec — значит гарантированно получить версию образа.
+XV="$(marzban logs -n 2>/dev/null | grep -oE 'Xray core [0-9][0-9.]*' | tail -1 | awk '{print $3}')"
+IMGV="$(docker exec "$CNAME0" xray version 2>/dev/null | awk 'NR==1{print $2}')"
+echo "  запущено (из лога Marzban): ${XV:-неизвестно — Marzban не стартовал?}"
+echo "  в docker-образе:            ${IMGV:-неизвестна}"
 
 # `marzban core-update` кладёт новый бинарник сюда, но НЕ трогает XRAY_EXECUTABLE_PATH.
 # Если путь указывает на ядро из образа, обновление молча не применяется.

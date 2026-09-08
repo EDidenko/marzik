@@ -2,26 +2,34 @@
 # Шаг 2+3: установка Marzban (Docker Compose) и настройка VLESS + Reality.
 # Запуск:  bash 02-install-marzban.sh
 # Переменные:
-#   REALITY_DEST=www.apple.com      dest/SNI основного инбаунда
+#   REALITY_DEST=www.apple.com      dest/SNI основного; по умолчанию берётся из конфига
 #   REALITY_DEST_ALT=...            dest/SNI резервного; по умолчанию берётся из конфига
 #   VLESS_PORT=443  VLESS_PORT_ALT=8443  PANEL_PORT=8000
 #   REGEN_KEYS=1        сгенерировать НОВУЮ пару x25519 и shortId (ломает все выданные ссылки)
 #   TAG_MAIN / TAG_ALT  теги инбаундов; по умолчанию берутся из существующего конфига
 #
 # Скрипт идемпотентен: повторный прогон (например, чтобы сменить REALITY_DEST) сохраняет
-# ключи, shortId и теги инбаундов, поэтому ссылки и привязки юзеров в панели переживают его.
+# ключи, shortId, теги инбаундов и оба dest, поэтому ссылки и привязки юзеров в панели
+# переживают его: голый прогон ничего у клиентов не ломает.
 set -euo pipefail
 
-# www.microsoft.com намеренно НЕ дефолт: на Xray 24.12.31 Reality-хендшейк с ним не
-# проходит — проверено сквозным тестом (08-selftest.sh), при том что снаружи порт
-# исправно отдаёт сертификат Microsoft и ВСЕ косвенные проверки зелёные.
-REALITY_DEST="${REALITY_DEST:-www.apple.com}"
 VLESS_PORT="${VLESS_PORT:-443}"
 VLESS_PORT_ALT="${VLESS_PORT_ALT:-8443}"
 PANEL_PORT="${PANEL_PORT:-8000}"
 COMPOSE=/opt/marzban/docker-compose.yml
 ENVFILE=/opt/marzban/.env
 XRAYJSON=/var/lib/marzban/xray_config.json
+
+# dest/SNI основного инбаунда. На повторном прогоне по умолчанию сохраняем то, что уже
+# стоит в конфиге: иначе безобидный перезапуск скрипта молча сменил бы SNI и обнулил
+# рабочие ссылки у клиентов. Сменить — только явным REALITY_DEST=...
+# www.microsoft.com намеренно не дефолт: сквозной тест (08-selftest.sh) с ним не прошёл,
+# при том что снаружи порт исправно отдавал сертификат Microsoft.
+if [[ -z "${REALITY_DEST:-}" && -f "$XRAYJSON" ]]; then
+  REALITY_DEST="$(jq -r '.inbounds[0].streamSettings.realitySettings.serverNames[0] // empty' \
+    "$XRAYJSON" 2>/dev/null || true)"
+fi
+REALITY_DEST="${REALITY_DEST:-www.apple.com}"
 
 [[ $EUID -eq 0 ]] || { echo "Запускать от root (или через sudo)"; exit 1; }
 
