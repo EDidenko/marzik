@@ -156,5 +156,5 @@ cat "${OUT_DIR}/reality.txt"
 echo "==============================================="
 echo "Сохранено в ${OUT_DIR}/reality.txt"
 echo
-echo "Логи ядра:  marzban logs -f   (Ctrl+C для выхода)"
+echo "Логи ядра:  marzban logs      (следует за выводом; Ctrl+C для выхода, -n — разовый дамп)"
 echo "Далее: создай админа ->  marzban cli admin create --sudo"

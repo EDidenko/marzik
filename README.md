@@ -238,7 +238,8 @@ vless://<uuid>@<IP>:443?security=reality&encryption=none&pbk=<publicKey>&fp=chro
 
 ```bash
 sudo bash 05-check.sh     # всё сразу
-sudo marzban logs -f      # живые логи Marzban + Xray
+sudo marzban logs         # живые логи Marzban + Xray (следует по умолчанию, Ctrl+C — выход)
+sudo marzban logs -n      # разовый дамп без слежения
 ```
 
 Ключевой тест маскировки — с любой машины:
@@ -316,7 +317,7 @@ Cron раз в неделю дёргает `marzban update` — штатный �
 ## Обслуживание
 
 ```bash
-sudo marzban status | restart | logs -f | update | core-update
+sudo marzban status | restart | logs [-n] | update | core-update
 sudo marzban cli admin create --sudo
 sudo marzban backup                 # бэкап /var/lib/marzban
 docker ps                           # без sudo: deploy в группе docker
