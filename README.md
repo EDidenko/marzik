@@ -16,6 +16,7 @@ Reality не режется DPI Vinaphone/Viettel, потому что для н
 | `server/04-autoupdate.sh` | автообновление: `cron` (рекомендуется) или `watchtower` |
 | `server/05-check.sh` | диагностика сервера: порты, логи, проверка маскировки снаружи |
 | `server/06-show-links.sh` | диагностика клиента: Hosts, теги, разобранная по параметрам `vless://` |
+| `server/07-debug-log.sh` | `on`/`off`: подробный лог Xray, чтобы увидеть отказ Reality-хендшейка |
 | `server/marzban.env.example` | что должно быть в `/opt/marzban/.env` |
 | `server/xray_config.example.json` | эталон конфига Reality |
 | `server/optional-ws-cdn.md` | запасной канал VLESS+WS через Cloudflare (нужен домен) |
@@ -281,10 +282,24 @@ sudo bash 05-check.sh          # сервер: порты, dest, маскиро�
 bash 06-show-links.sh <юзер>   # клиент: что панель реально отдаёт в ссылке
 ```
 
-Если `05-check.sh` показал сертификат нужного домена и `Verify return code: 0`, сервер
-исправен — смотри вывод `06-show-links.sh`. Пустой `fp` или пустой `sni` в Hosts дают
-ровно этот симптом: TLS-сессия встаёт, клиент пишет «подключено», трафик не идёт.
-Лечится в панели: **Hosts** → Address = IP сервера, **Fingerprint = chrome**.
+Если `05-check.sh` показал сертификат нужного домена и `Verify return code: 0`, серверная
+часть Reality исправна — смотри итоговые ссылки в `06-show-links.sh`. Там должны быть
+`sni=`, `fp=chrome`, `pbk=`, `sid=`, `flow=xtls-rprx-vision`; `pbk`/`sid` обязаны совпадать
+с `~/marzban/reality.txt`. Пустые `sni`/`fp` в секции Hosts — не проблема: Marzban
+наследует их из инбаунда, судить можно только по самой ссылке.
+
+Ссылка верна, а трафика всё равно нет — включай подробный лог и смотри, доходит ли
+хендшейк вообще:
+
+```bash
+sudo bash 07-debug-log.sh on
+sudo marzban logs            # и в этот момент подключайся с телефона
+sudo bash 07-debug-log.sh off
+```
+
+`REALITY: processed invalid connection` — клиент не опознан (не сходятся `pbk`/`sid`/`sni`).
+Хендшейк прошёл, но ответа нет — ищи проблему в исходящей связности сервера
+(секция «Исходящая связность» в `05-check.sh`).
 
 Если же сервер снаружи не отдаёт сертификат — SNI забанен или недоступен с сервера.
 Перегони с другим dest: ключи, `shortId` и юзеры сохранятся, поменяется только SNI

@@ -45,6 +45,7 @@ with any script change).
 | `04-autoupdate.sh` | root | `cron` mode (weekly `marzban update`, recommended) or `watchtower` mode |
 | `05-check.sh` | root | server-side diagnostics: containers, listening ports, UFW, logs, JSON validity, Reality masquerade probe |
 | `06-show-links.sh` | any user (REST API) | client-side diagnostics: panel Hosts (address/sni/fingerprint), inbound tags, and each `vless://` link broken out param-by-param with the UUID masked |
+| `07-debug-log.sh` | root | `on`/`off` toggle for `log.loglevel=debug` + `realitySettings.show=true`, backing the config up to `.predebug` and restoring it on `off` |
 
 Key facts that span files:
 
@@ -68,11 +69,17 @@ Key facts that span files:
   any script; update them when the generator logic changes.
 - After first panel login the operator must set Fingerprint=`chrome` in **Hosts** — without
   `fp=chrome` many clients (iOS especially) fail. This is manual and documented in README §3.
-- **Debugging "client says connected but no traffic" splits in two**: `05-check.sh` proves the
-  server (a valid dest certificate returned on the VLESS port with `Verify return code: 0` means
-  Reality itself is fine), and `06-show-links.sh` proves what the panel hands the client. An
-  empty `fingerprint` or `sni` in Hosts produces exactly that symptom — the TLS session
-  establishes, so the client reports success while no data flows.
+- **Debugging "client says connected but no traffic" has a fixed order**: `05-check.sh` proves
+  the server (a valid dest certificate on the VLESS port with `Verify return code: 0` means
+  Reality's server side is fine), `06-show-links.sh` proves what the panel hands the client,
+  then `07-debug-log.sh on` makes the handshake itself visible. Empty `sni`/`fingerprint` in
+  Hosts is **not** a fault — Marzban inherits them from the inbound; only the generated
+  `vless://` is authoritative.
+- **Reality failures are silent by default.** At `loglevel: warning` with `show: false`, a
+  rejected handshake logs nothing at all, so `marzban logs` shows only panel API lines and
+  looks healthy. Anything that raises `realitySettings.show` must use a
+  `select(.streamSettings.realitySettings)` guard, or jq will graft `realitySettings` onto
+  non-Reality inbounds and corrupt the config.
 - `optional-ws-cdn.md` is an unautomated fallback (VLESS+WS behind Cloudflare, needs a domain).
 
 ## State on the server (not in this repo)

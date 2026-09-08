@@ -32,14 +32,16 @@ hr "Инбаунды, которые видит панель"
 curl -sf "${API}/api/inbounds" "${auth[@]}" | jq -r '.vless[]? | "\(.tag)  port=\(.port)  network=\(.network)  tls=\(.tls)"'
 
 hr "Hosts (address / sni / fingerprint / alpn)"
-# Пустой fingerprint — самая частая причина «подключено, но трафика нет» на iOS.
+# Пустое поле здесь НЕ означает «параметра не будет в ссылке»: Marzban наследует
+# sni/fp из инбаунда. Судить можно только по итоговой ссылке в конце вывода.
 HOSTS="$(curl -sf "${API}/api/hosts" "${auth[@]}")"
 if [[ "$(jq -r 'to_entries | map(.value | length) | add // 0' <<<"$HOSTS")" == "0" ]]; then
   echo "Hosts не заданы ни для одного инбаунда."
   echo "-> Панель -> Hosts -> у инбаунда задай Address = IP сервера и Fingerprint = chrome"
 else
-  jq -r 'to_entries[] | .key as $tag | .value[]
-         | "\($tag):\n  remark : \(.remark)\n  address: \(.address)\n  port   : \(.port // "(из инбаунда)")\n  sni    : \(.sni // "" | if . == "" then "ПУСТО" else . end)\n  host   : \(.host // "")\n  fp     : \(.fingerprint // "" | if . == "" then "ПУСТО <- вероятная причина" else . end)\n  alpn   : \(.alpn // "")"' <<<"$HOSTS"
+  jq -r 'def val: if (. // "") == "" then "(наследуется из инбаунда)" else . end;
+         to_entries[] | .key as $tag | .value[]
+         | "\($tag):\n  remark : \(.remark)\n  address: \(.address)\n  port   : \(.port // "(из инбаунда)")\n  sni    : \(.sni | val)\n  host   : \(.host // "")\n  fp     : \(.fingerprint | val)\n  alpn   : \(.alpn // "")"' <<<"$HOSTS"
 fi
 
 hr "Пользователи"

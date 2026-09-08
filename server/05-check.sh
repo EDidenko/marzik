@@ -38,6 +38,24 @@ timeout 10 openssl s_client -connect "${IP}:${VLESS_PORT}" -servername "${DEST}"
   | grep -E 'subject=|TLSv1.3|Verify return code' | head -5
 echo "^ должен показать сертификат ${DEST} — значит Reality корректно маскируется"
 
+hr "Исходящая связность (то, чем xray ходит в интернет)"
+# Если хендшейк проходит, а трафика нет, ломается обычно здесь. Два классических случая:
+# на VPS есть адрес IPv6 без рабочего маршрута, и не резолвится DNS внутри контейнера —
+# при sniffing + destOverride это убивает вообще весь пользовательский трафик.
+printf 'хост IPv4  : '; curl -s -4 --connect-timeout 5 -m 8 -o /dev/null -w '%{http_code}\n' \
+  https://www.google.com || echo "FAIL — у сервера нет исхода в интернет"
+if ip -6 addr show scope global 2>/dev/null | grep -q inet6; then
+  printf 'хост IPv6  : '; curl -s -6 --connect-timeout 5 -m 8 -o /dev/null -w '%{http_code}\n' \
+    https://www.google.com \
+    || echo "адрес есть, но НЕ РАБОТАЕТ -> добавь freedom domainStrategy=UseIPv4"
+else
+  echo "хост IPv6  : адреса нет (нормально)"
+fi
+CNAME="$(docker ps --format '{{.Names}}' | grep -i marzban | head -1)"
+printf 'DNS в контейнере: '
+docker exec "$CNAME" getent hosts www.google.com 2>/dev/null \
+  || echo "НЕ РЕЗОЛВИТСЯ — при sniffing+destOverride это ломает весь трафик"
+
 hr "Параметры Reality"
 find /root /home -maxdepth 3 -name reality.txt -path '*/marzban/*' 2>/dev/null \
   | head -1 | xargs -r cat || echo "reality.txt не найден"
