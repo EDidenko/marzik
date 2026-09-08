@@ -27,9 +27,12 @@ command -v jq >/dev/null || apt-get -y -qq install jq
 
 CNAME="$(docker ps --format '{{.Names}}' | grep -i marzban | head -1)"
 [[ -n "$CNAME" ]] || { echo "!! Контейнер Marzban не найден"; exit 1; }
+IMAGE="$(docker inspect -f '{{.Config.Image}}' "$CNAME")"
+TESTC=marzik-selftest
 
-cleanup(){ docker exec "$CNAME" pkill -f selftest-client.json >/dev/null 2>&1 || true; rm -f "$CFG"; }
+cleanup(){ docker rm -f "$TESTC" >/dev/null 2>&1 || true; rm -f "$CFG"; }
 trap cleanup EXIT
+docker rm -f "$TESTC" >/dev/null 2>&1 || true
 
 ADMIN_USER="${ADMIN_USER:-}"; ADMIN_PASS="${ADMIN_PASS:-}"
 [[ -n "$ADMIN_USER" ]] || read -rp  "Admin login: "    ADMIN_USER
@@ -75,11 +78,24 @@ jq -n --arg uuid "$UUID" --arg host "$RHOST" --argjson port "$RPORT" \
                            publicKey:$pbk, shortId:$sid } } } ] }' >"$CFG"
 chmod 600 "$CFG"
 
-echo "==> Запускаю временный xray-клиент внутри ${CNAME} (socks 127.0.0.1:${SOCKS_PORT})"
-docker exec -d "$CNAME" xray -c "$CFG"
-sleep 3
-docker exec "$CNAME" pgrep -f selftest-client.json >/dev/null \
-  || { echo "!! Клиент не поднялся. Лог:"; docker exec "$CNAME" xray -test -c "$CFG" || true; exit 1; }
+echo "==> Запускаю временный xray-клиент (образ ${IMAGE}, socks 127.0.0.1:${SOCKS_PORT})"
+# Отдельный контейнер, а не `docker exec -d` в Marzban: так процессом можно управлять
+# снаружи (`docker rm -f`) и читать его лог, не полагаясь на pgrep/pkill — в образе
+# Marzban пакета procps нет, и проверка «поднялся ли клиент» через pgrep всегда врёт.
+docker run -d --name "$TESTC" --network host \
+  -v "${SHARED}:${SHARED}:ro" --entrypoint sh \
+  "$IMAGE" -c "exec xray -c ${CFG}" >/dev/null
+
+# Контейнер в host-сети, поэтому socks-порт виден с хоста обычным ss.
+for _ in $(seq 1 10); do
+  ss -lntH "sport = :${SOCKS_PORT}" 2>/dev/null | grep -q . && break
+  sleep 1
+done
+if ! ss -lntH "sport = :${SOCKS_PORT}" 2>/dev/null | grep -q .; then
+  echo "!! Клиент не поднялся: порт ${SOCKS_PORT} не слушает. Лог контейнера:"
+  docker logs "$TESTC" 2>&1 | tail -20
+  exit 1
+fi
 
 echo "==> Иду наружу через туннель"
 OUT="$(curl -s --socks5-hostname "127.0.0.1:${SOCKS_PORT}" --connect-timeout 8 -m 20 \
